@@ -28,7 +28,27 @@ Similar fragmentation strategies are applied to separate volatile stats (writes)
 ## Running the Benchmarks
 Each notebook generates a temporary SQLite database in `temp/db/` and prints execution times.
 
-```bash
-# Example
-python archive/benchmarks/benchmark_user.py
-```
+
+## Real-World Scale Analysis: Is it worth it?
+
+The benchmarks show a **~4x-6x Write Penalty** but a **~2x Read Speedup**. Is this trade-off roughly profitable?
+
+### The "90-9-1" Rule (or 100:1 Read-to-Write Ratio)
+In social media, for every **1 post created**, there are typically **100+ views** (Feed loads, Profile visits).
+
+Let's assume:
+*   **Write Cost (Monolith)**: 10ms
+*   **Write Cost (Fragmented)**: 50ms (5x penalty) → **+40ms cost**
+*   **Read Cost (Monolith)**: 50ms
+*   **Read Cost (Fragmented)**: 25ms (2x speedup) → **-25ms saved**
+
+### The Calculation
+If a user creates **1 Post** and views their feed **10 times** in a day:
+
+1.  **Write "Loss"**: $1 \text{ post} \times 40\text{ms} = \mathbf{40\text{ms lost}}$
+2.  **Read "Gain"**: $10 \text{ views} \times 25\text{ms} = \mathbf{250\text{ms gained}}$
+
+### Net Result
+**210ms saved per user, per day.**
+At 100,000 users, this fragmentation strategy saves **~5.8 hours of cumulative database processing time per day**, despite the slower writes. This frees up significant CPU/IO resources for the system to handle concurrent users.
+
