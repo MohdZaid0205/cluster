@@ -230,13 +230,20 @@ def populate_users(n=1000):
         )
         profiles.append(profile)
     
+
     with Session(engine) as session:
         for i in range(0, len(users), 1000):
             session.add_all(users[i:i+1000])
             session.add_all(profiles[i:i+1000])
             session.commit()
+            
+    # Filter users who can post: Verified OR has email OR has phone
+    poster_ids = [
+        u.uid for u in users 
+        if u.is_verified or u.email is not None or u.phone is not None
+    ]
     
-    return user_ids
+    return user_ids, poster_ids
 
 
 def populate_clusters(user_ids, n=100):
@@ -250,11 +257,11 @@ def populate_clusters(user_ids, n=100):
     # 1. Create Clusters
     for _ in range(n):
         cid = uuid4()
-        creator = random.choice(user_ids)
+        creator = random.choice(user_ids) # Any user can create/join for now
         core = ClusterCore(
             cid=cid,
             name=fake.company(),
-            category=random.choice(["Tech", "Art", "News", "Gaming", "Music", "Science"]), # Fixed categories for querying
+            category=random.choice(["Tech", "Art", "News", "Gaming", "Music", "Science"]), 
             is_private=random.choice([True, False]),
             profile_icon=fake.image_url()
         )
@@ -343,6 +350,7 @@ def populate_clusters(user_ids, n=100):
 
 def populate_posts(user_ids, cluster_ids, n=10000):
     print(f"Generating {n} Posts (Outlier Distribution)...")
+    # user_ids here should be the 'poster_ids' subset
     posts_core = []
     posts_content = []
     posts_stats = []
@@ -353,8 +361,12 @@ def populate_posts(user_ids, cluster_ids, n=10000):
     # 19% Active Users create 50% of posts
     # 80% Lurkers create 0 posts
     
-    power_user_count = int(len(user_ids) * 0.01)
-    active_user_count = int(len(user_ids) * 0.19)
+    if not user_ids:
+        print("Warning: No eligible posters found!")
+        return []
+        
+    power_user_count = max(1, int(len(user_ids) * 0.01))
+    active_user_count = max(1, int(len(user_ids) * 0.19))
     
     shuffled_users = list(user_ids)
     random.shuffle(shuffled_users)
@@ -363,8 +375,9 @@ def populate_posts(user_ids, cluster_ids, n=10000):
     active_users = shuffled_users[power_user_count : power_user_count + active_user_count]
     # Lurkers = Rest
     
-    posts_per_power_user = int((n * 0.5) / len(power_users))
-    posts_per_active_user = int((n * 0.5) / len(active_users))
+    # Safety check for division
+    posts_per_power_user = int((n * 0.5) / len(power_users)) if power_users else 0
+    posts_per_active_user = int((n * 0.5) / len(active_users)) if active_users else 0
     
     # Helper to generate a post
     def create_post_obj(uid):
@@ -395,7 +408,7 @@ def populate_posts(user_ids, cluster_ids, n=10000):
     # Fill remainder (rounding errors) with random active users
     current_count = len(posts_core)
     while current_count < n:
-        uid = random.choice(active_users)
+        uid = random.choice(active_users) if active_users else random.choice(user_ids)
         create_post_obj(uid)
         current_count += 1
         
@@ -416,7 +429,7 @@ def populate_reactions(user_ids, post_ids, comment_ids):
         # 10% of posts get reactions
         target_posts = random.sample(post_ids, k=int(len(post_ids) * 0.1))
         for pid in target_posts:
-            # Random users react
+            # Random users react (Anyone can react)
             reactors = random.sample(user_ids, k=random.randint(1, 10))
             for uid in reactors:
                 reaction = PostReaction(
@@ -450,6 +463,7 @@ def populate_special_features(user_ids, cluster_ids, post_ids):
         # Windows (Shares)
         # Create new "Window" posts that share existing posts
         # We need to create PostCore entries for them first as per schema (Window PK is foreign key to Post)
+        # Only capable posters should share/window
         
         # Share 1000 posts
         users_to_share = random.choices(user_ids, k=1000)
@@ -521,9 +535,16 @@ def main():
     
     start = time.time()
     
-    user_ids = populate_users(N_USERS)
-    cluster_ids = populate_clusters(user_ids, N_CLUSTERS)
-    post_ids = populate_posts(user_ids, cluster_ids, N_POSTS)
+    # populate_users now returns tuple
+    user_ids, poster_ids = populate_users(N_USERS)
+    print(f"Eligible Posters: {len(poster_ids)} / {N_USERS}")
+    
+
+    # Only eligible posters can create/join clusters
+    cluster_ids = populate_clusters(poster_ids, N_CLUSTERS)
+    
+    # Use poster_ids for generating content (Posts)
+    post_ids = populate_posts(poster_ids, cluster_ids, N_POSTS)
     
     # Comments
     print("Generating Comments...")
@@ -533,6 +554,7 @@ def main():
         target_posts = post_ids[:5000]
         for pid in target_posts:
             for _ in range(random.randint(1, 5)):
+                # Lurkers CAN comment (User Report 1)
                 uid = random.choice(user_ids)
                 core = CommentCore(uid=uid, pid=pid)
                 session.add(core)
@@ -542,10 +564,15 @@ def main():
         session.commit()
     
     # NEW: Populate Relations
+    # Reactions can come from lurkers (all users)
     populate_reactions(user_ids, post_ids, comment_ids)
-    populate_special_features(user_ids, cluster_ids, post_ids)
+    
+    # Windows/Megaphones should probably come from posters
+    populate_special_features(poster_ids, cluster_ids, post_ids)
         
     print(f"Done! Created {N_USERS} Users, {N_CLUSTERS} Clusters, {N_POSTS} Posts + Relations in {time.time()-start:.2f}s")
+
+
 
 
 if __name__ == "__main__":
