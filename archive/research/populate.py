@@ -192,11 +192,13 @@ class CommentReaction(SQLModel, table=True):
 # --- Generation Logic ---
 
 
+
 def populate_users(n=1000):
     print(f"Generating {n} Users...")
     users = []
     profiles = []
     user_ids = []
+    poster_ids = []
     
     for _ in range(n):
         # Generate UID explicitly to ensure we have it safe
@@ -219,6 +221,9 @@ def populate_users(n=1000):
         users.append(auth)
         user_ids.append(uid)
         
+        if is_verified or email is not None or phone is not None:
+            poster_ids.append(uid)
+        
         profile = UserProfile(
             uid=uid,
             name=fake.name(),
@@ -237,13 +242,8 @@ def populate_users(n=1000):
             session.add_all(profiles[i:i+1000])
             session.commit()
             
-    # Filter users who can post: Verified OR has email OR has phone
-    poster_ids = [
-        u.uid for u in users 
-        if u.is_verified or u.email is not None or u.phone is not None
-    ]
-    
     return user_ids, poster_ids
+
 
 
 def populate_clusters(user_ids, n=100):
