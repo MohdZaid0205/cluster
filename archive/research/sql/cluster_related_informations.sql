@@ -21,7 +21,7 @@ ORDER BY member_count DESC
 SELECT cid, name, category
 FROM clustercore
 WHERE
-    name LIKE '%Techno%'
+    name LIKE '%Ltd%'
 
 -- c. LIST CLUSTERS BY CATEGORY
 SELECT cid, name, member_count
