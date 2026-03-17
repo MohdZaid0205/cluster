@@ -23,6 +23,7 @@ if DB_TYPE == "mysql":
     # Needs PyMySQL driver installed: pip install pymysql
     DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+    _sqlite = False
 
 else:
     # Default SQLite Configuration
@@ -33,8 +34,12 @@ else:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     
     DATABASE_URL = f"sqlite:///{DB_PATH}"
-    # check_same_thread necessary for FastAPI + SQLite
     engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+    _sqlite = True
+
+if _sqlite:
+    from api.triggers import register_triggers
+    register_triggers(engine)
 
 def get_session():
     """

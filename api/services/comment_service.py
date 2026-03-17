@@ -93,7 +93,8 @@ class CommentService:
     @staticmethod
     def create_comment(session: Session, comment_in):
         """
-        Spawns a new comment entity, including its content text and tracking stats.
+        Spawns a new comment entity and its content text.
+        CommentStats is auto-created by the trg_init_comment_stats trigger.
         """
         core_comment = CommentCore(
             uid        = comment_in.uid,
@@ -101,20 +102,19 @@ class CommentService:
             parent_mid = comment_in.parent_mid
         )
         session.add(core_comment)
-        session.flush()
+        session.flush()  # generate mid before FK inserts
 
         content = CommentContent(
             mid     = core_comment.mid,
             content = comment_in.content
         )
         session.add(content)
+        session.commit()          # trigger fires here, creating CommentStats
+        session.expire_all()      # clear cache so we see trigger-created rows
 
-        stats = CommentStats(mid=core_comment.mid)
-        session.add(stats)
-        session.commit()
         session.refresh(core_comment)
         session.refresh(content)
-        session.refresh(stats)
+        stats = session.get(CommentStats, core_comment.mid)
 
         return core_comment, content, stats
 

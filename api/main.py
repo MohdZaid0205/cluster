@@ -23,7 +23,8 @@ app.include_router(comments.router)
 # Base directory is one level up from "api" (where "app" is located)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASE_DIR, "app", "web")
-app.mount("/web", StaticFiles(directory=WEB_DIR, html=True), name="web")
+if os.path.isdir(WEB_DIR):
+    app.mount("/web", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
 @app.get("/")
 def root():

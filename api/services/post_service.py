@@ -181,7 +181,8 @@ class PostService:
     @staticmethod
     def create_post(session: Session, post_in):
         """
-        Initializes a post including its content payload and statistics tracker.
+        Initializes a post including its content payload.
+        PostStats is auto-created by the trg_init_post_stats trigger.
         """
         core_post = PostCore(
             uid  = post_in.uid,
@@ -189,7 +190,7 @@ class PostService:
             type = post_in.type
         )
         session.add(core_post)
-        session.flush()
+        session.flush()  # generate pid before FK inserts
 
         content = PostContent(
             pid     = core_post.pid,
@@ -197,13 +198,12 @@ class PostService:
             tags    = post_in.tags
         )
         session.add(content)
+        session.commit()          # trigger fires here, creating PostStats
+        session.expire_all()      # clear cache so we see trigger-created rows
 
-        stats = PostStats(pid=core_post.pid)
-        session.add(stats)
-        session.commit()
         session.refresh(core_post)
         session.refresh(content)
-        session.refresh(stats)
+        stats = session.get(PostStats, core_post.pid)
 
         return core_post, content, stats
 

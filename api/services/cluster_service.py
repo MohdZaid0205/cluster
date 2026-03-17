@@ -202,6 +202,8 @@ class ClusterService:
     def create_cluster(session: Session, cluster_in):
         """
         Instantiates a new cluster architecture (core, info, stats, initial member).
+        ClusterStats.member_count is incremented from 0 by trg_increment_member_count
+        when the first ClusterMember row is inserted.
         """
         core_cluster = ClusterCore(
             name         = cluster_in.name,
@@ -219,20 +221,23 @@ class ClusterService:
             tags        = cluster_in.tags
         )
         session.add(info)
-        
-        stats = ClusterStats(cid=core_cluster.cid, member_count=1)
+
+        # Start at 0 — trigger will increment to 1 when member row is inserted
+        stats = ClusterStats(cid=core_cluster.cid, member_count=0)
         session.add(stats)
-        
+        session.flush()           # persist stats row BEFORE member insert triggers the increment
+
         member = ClusterMember(
-            cid = core_cluster.cid,
-            uid = cluster_in.creator_uid,
+            cid  = core_cluster.cid,
+            uid  = cluster_in.creator_uid,
             role = "MODERATOR"
         )
         session.add(member)
         session.commit()
+        session.expire_all()      # clear cache so trigger-updated member_count is visible
         session.refresh(core_cluster)
         session.refresh(info)
-        session.refresh(stats)
+        stats = session.get(ClusterStats, core_cluster.cid)
 
         return core_cluster, info, stats
 
@@ -250,32 +255,26 @@ class ClusterService:
     @staticmethod
     def add_user_to_cluster(session: Session, cid: UUID, uid: UUID, role: str = "MEMBER"):
         """
-        Joins a user to a cluster and increments the statistics.
+        Joins a user to a cluster.
+        ClusterStats.member_count is incremented by trg_increment_member_count.
         """
         member = ClusterMember(cid=cid, uid=uid, role=role)
         session.add(member)
-        
-        stats = session.get(ClusterStats, cid)
-        if stats:
-            stats.member_count += 1
-            session.add(stats)
-            
         session.commit()
+        session.expire_all()
         return member
 
     @staticmethod
     def remove_user_from_cluster(session: Session, cid: UUID, uid: UUID):
         """
-        Removes a user from a cluster and updates stats.
+        Removes a user from a cluster.
+        ClusterStats.member_count is decremented by trg_decrement_member_count.
         """
         statement = select(ClusterMember).where(ClusterMember.cid == cid, ClusterMember.uid == uid)
         member = session.exec(statement).first()
         if member:
             session.delete(member)
-            stats = session.get(ClusterStats, cid)
-            if stats:
-                stats.member_count -= 1
-                session.add(stats)
             session.commit()
+            session.expire_all()
             return True
         return False
