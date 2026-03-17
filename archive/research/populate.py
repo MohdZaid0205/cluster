@@ -3,7 +3,7 @@ import os
 import random
 import time
 from uuid import uuid4, UUID
-from datetime import datetime, timedelta
+from datetime import datetime, UTC, timedelta
 from typing import Optional, List
 from enum import Enum
 from sqlmodel import Field, SQLModel, create_engine, Session, select
@@ -65,8 +65,8 @@ class UserProfile(SQLModel, table=True):
     bio: Optional[str] = None
     location: Optional[str] = None
     profile_image: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_active: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_active: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 # 2. Cluster
 class ClusterCore(SQLModel, table=True):
@@ -82,7 +82,7 @@ class ClusterInfo(SQLModel, table=True):
     cid: UUID = Field(primary_key=True, foreign_key="clustercore.cid")
     description: Optional[str] = None
     creator_uid: UUID = Field(foreign_key="userauth.uid") # Link to UserAuth or Profile
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     tags: Optional[str] = None
 
 class ClusterStats(SQLModel, table=True):
@@ -95,7 +95,7 @@ class ClusterMember(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
     cid: UUID = Field(primary_key=True, foreign_key="clustercore.cid")
     uid: UUID = Field(primary_key=True, foreign_key="userauth.uid")
-    joined_at: datetime = Field(default_factory=datetime.utcnow)
+    joined_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     role: ClusterRole = Field(default=ClusterRole.MEMBER)
 
 class ClusterModerator(SQLModel, table=True):
@@ -103,7 +103,7 @@ class ClusterModerator(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
     cid: UUID = Field(primary_key=True, foreign_key="clustercore.cid")
     uid: UUID = Field(primary_key=True, foreign_key="userauth.uid")
-    assigned_at: datetime = Field(default_factory=datetime.utcnow)
+    assigned_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 class ClusterRule(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
@@ -121,7 +121,7 @@ class PostCore(SQLModel, table=True):
     uid: UUID = Field(index=True, foreign_key="userauth.uid")
     cid: UUID = Field(index=True, foreign_key="clustercore.cid")
     type: PostType = Field(default=PostType.TEXT)
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), index=True)
     updated_at: Optional[datetime] = None
 
 class PostContent(SQLModel, table=True):
@@ -142,7 +142,7 @@ class PostReaction(SQLModel, table=True):
     pid: UUID = Field(primary_key=True, foreign_key="postcore.pid")
     uid: UUID = Field(primary_key=True, foreign_key="userauth.uid")
     reaction_type: ReactionType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 class Window(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
@@ -150,7 +150,7 @@ class Window(SQLModel, table=True):
     origin_pid: UUID = Field(foreign_key="postcore.pid")
     shared_by_uid: UUID = Field(foreign_key="userauth.uid")
     shared_into_cid: UUID = Field(foreign_key="clustercore.cid")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 class Megaphone(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
@@ -168,7 +168,7 @@ class CommentCore(SQLModel, table=True):
     uid: UUID = Field(foreign_key="userauth.uid")
     pid: Optional[UUID] = Field(default=None,  index=True, foreign_key="postcore.pid") # Root comment
     parent_mid: Optional[UUID] = Field(default=None, index=True, foreign_key="commentcore.mid") # Reply
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), index=True)
 
 class CommentContent(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
@@ -186,7 +186,7 @@ class CommentReaction(SQLModel, table=True):
     mid: UUID = Field(primary_key=True, foreign_key="commentcore.mid")
     uid: UUID = Field(primary_key=True, foreign_key="userauth.uid")
     reaction_type: ReactionType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # --- Generation Logic ---
@@ -513,8 +513,8 @@ def populate_special_features(user_ids, cluster_ids, post_ids):
             
             mega = Megaphone(
                 pid=mega_post.pid,
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(days=7),
+                start_time=datetime.now(UTC),
+                end_time=datetime.now(UTC) + timedelta(days=7),
                 type=random.choice(list(MegaphoneType)),
                 is_active=True,
                 subscriber_count=random.randint(0, 500)
