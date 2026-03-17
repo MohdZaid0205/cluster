@@ -1,0 +1,68 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
+from typing import List
+from uuid import UUID
+
+from api.database import get_session
+from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember
+from api.schemas.cluster import ClusterCreate, ClusterResponse, ClusterDetailResponse, ClusterMemberCreate
+from api.services.cluster_service import ClusterService
+
+router = APIRouter(prefix="/clusters", tags=["Clusters"])
+
+@router.post("/", response_model=ClusterDetailResponse)
+def create_cluster(cluster_in: ClusterCreate, session: Session = Depends(get_session)):
+    """
+    Creates a new cluster instance, including its core schema, info, stats, and initial member assignment.
+    """
+    core_cluster, info, stats = ClusterService.create_cluster(session, cluster_in)
+
+    return {
+        "cid"         : core_cluster.cid,
+        "name"        : core_cluster.name,
+        "category"    : core_cluster.category,
+        "is_private"  : core_cluster.is_private,
+        "profile_icon": core_cluster.profile_icon,
+        "description" : info.description,
+        "creator_uid" : info.creator_uid,
+        "tags"        : info.tags,
+        "created_at"  : info.created_at,
+        "member_count": stats.member_count
+    }
+
+@router.get("/{cid}", response_model=ClusterDetailResponse)
+def get_cluster(cid: UUID, session: Session = Depends(get_session)):
+    """
+    Retrieves full details for a specified cluster including its extended info and stats.
+    """
+    result = ClusterService.get_cluster_full_profile(session, cid)
+    if not result:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+        
+    core, info, stats = result
+
+    return {
+        "cid"         : core.cid,
+        "name"        : core.name,
+        "category"    : core.category,
+        "is_private"  : core.is_private,
+        "profile_icon": core.profile_icon,
+        "description" : info.description if info else None,
+        "creator_uid" : info.creator_uid if info else None,
+        "created_at"  : info.created_at if info else None,
+        "tags"        : info.tags if info else None,
+        "member_count": stats.member_count if stats else 0
+    }
+
+@router.get("/", response_model=List[ClusterResponse])
+def list_clusters(skip: int = 0, limit: int = 100, category: str = None, session: Session = Depends(get_session)):
+    """
+    Retrieves a paginated list of all active clusters in the system, optionally filtered by category.
+    """
+    statement = select(ClusterCore)
+    if category:
+        statement = statement.where(ClusterCore.category == category)
+    
+    statement = statement.offset(skip).limit(limit)
+    clusters = session.exec(statement).all()
+    return clusters
