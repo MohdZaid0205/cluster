@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 from api.routers import users, clusters, posts, comments
@@ -9,6 +10,15 @@ from api.database import engine
 # from sqlmodel import SQLModel
 
 app = FastAPI(title="Cluster API", version="1.0.0", description="Backend API for the Cluster application.")
+
+# CORS – allow the Vite dev-server (and any localhost origin) to reach the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://[::]:8080"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Note: We do not call SQLModel.metadata.create_all(engine) because the database
 # already exists and is populated via `archive/research/populate.py`. 
