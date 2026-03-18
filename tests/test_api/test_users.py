@@ -56,3 +56,14 @@ def test_list_users(client: TestClient, test_user):
     data = response.json()
     assert len(data) >= 1
     assert any(u["uid"] == str(test_user.uid) for u in data)
+
+def test_login_success(client: TestClient, test_user, test_password):
+    login_data = {"username": test_user.email, "password": test_password}
+    response = client.post("/users/login", data=login_data)
+    assert response.status_code == 200
+    assert "access_token" in response.json()
+
+def test_get_my_profile_success(client: TestClient, auth_headers):
+    response = client.get("/users/me/profile", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["name"] == "Test User"

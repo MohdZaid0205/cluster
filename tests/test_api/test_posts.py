@@ -4,7 +4,7 @@ from uuid import uuid4
 from sqlmodel import Session
 from api.models.post import PostCore, PostContent, PostStats
 
-def test_create_post_success(client: TestClient, test_user, test_cluster):
+def test_create_post_success(client: TestClient, test_user, test_cluster, auth_headers):
     post_data = {
         "uid": str(test_user.uid),
         "cid": str(test_cluster.cid),
@@ -13,7 +13,7 @@ def test_create_post_success(client: TestClient, test_user, test_cluster):
         "tags": "api, test"
     }
 
-    response = client.post("/posts/", json=post_data)
+    response = client.post("/posts/", json=post_data, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "pid" in data
@@ -39,13 +39,13 @@ def test_list_posts(client: TestClient, test_post, test_cluster):
     assert len(data) >= 1
     assert any(p["pid"] == str(test_post.pid) for p in data)
 
-def test_react_to_post(client: TestClient, test_post, test_user, session: Session):
+def test_react_to_post(client: TestClient, test_post, test_user, session: Session, auth_headers):
     reaction_data = {
         "uid": str(test_user.uid),
         "reaction_type": "LIKE"
     }
     
-    response = client.post(f"/posts/{test_post.pid}/react", json=reaction_data)
+    response = client.post(f"/posts/{test_post.pid}/react", json=reaction_data, headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["message"] == "Reaction recorded successfully"
     

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from api.models.cluster import ClusterCore
 
-def test_create_cluster_success(client: TestClient, test_user):
+def test_create_cluster_success(client: TestClient, test_user, auth_headers):
     cluster_data = {
         "name": "API Test Cluster",
         "category": "API",
@@ -15,7 +15,7 @@ def test_create_cluster_success(client: TestClient, test_user):
         "tags": "api, test"
     }
 
-    response = client.post("/clusters/", json=cluster_data)
+    response = client.post("/clusters/", json=cluster_data, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "cid" in data
@@ -23,14 +23,14 @@ def test_create_cluster_success(client: TestClient, test_user):
     assert data["member_count"] == 1
     assert data["creator_uid"] == str(test_user.uid)
 
-def test_get_cluster_success(client: TestClient, test_user, session: Session):
+def test_get_cluster_success(client: TestClient, test_user, session: Session, auth_headers):
     # First create a cluster
     cluster_data = {
         "name": "Get Test Cluster",
         "category": "Test",
         "creator_uid": str(test_user.uid)
     }
-    create_response = client.post("/clusters/", json=cluster_data)
+    create_response = client.post("/clusters/", json=cluster_data, headers=auth_headers)
     cid = create_response.json()["cid"]
 
     # Now get it
@@ -46,10 +46,10 @@ def test_get_cluster_not_found(client: TestClient):
     assert response.status_code == 404
     assert response.json()["detail"] == "Cluster not found"
 
-def test_list_clusters(client: TestClient, test_user):
+def test_list_clusters(client: TestClient, test_user, auth_headers):
     # Create two clusters with different categories
-    client.post("/clusters/", json={"name": "C1", "category": "Cat1", "creator_uid": str(test_user.uid)})
-    client.post("/clusters/", json={"name": "C2", "category": "Cat2", "creator_uid": str(test_user.uid)})
+    client.post("/clusters/", json={"name": "C1", "category": "Cat1", "creator_uid": str(test_user.uid)}, headers=auth_headers)
+    client.post("/clusters/", json={"name": "C2", "category": "Cat2", "creator_uid": str(test_user.uid)}, headers=auth_headers)
     
     # List all
     response = client.get("/clusters/")
