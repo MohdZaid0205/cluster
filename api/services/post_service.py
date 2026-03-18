@@ -1,6 +1,6 @@
 from sqlmodel import Session, select, func, desc, or_
 from typing import List, Optional
-from datetime import datetime, UTC
+from datetime import datetime
 from uuid import UUID
 
 from api.models.post import PostCore, PostContent, PostStats, PostReaction, Window, Megaphone
@@ -129,7 +129,7 @@ class PostService:
             .join(PostCore, Megaphone.pid == PostCore.pid)
             .join(PostContent, Megaphone.pid == PostContent.pid)
             .where(Megaphone.is_active == True)
-            .where(Megaphone.end_time > datetime.now(UTC))
+            .where(Megaphone.end_time > datetime.now())
         )
         return session.exec(statement).all()
 

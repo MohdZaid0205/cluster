@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import Session, select
+from sqlmodel import Session, select, desc
 from typing import List, Optional, Any
 from uuid import UUID
 
@@ -63,7 +63,7 @@ def list_posts(skip: int = 0, limit: int = 100, cid: Optional[UUID] = None, sess
     if cid:
         statement = statement.where(PostCore.cid == cid)
     
-    statement = statement.offset(skip).limit(limit)
+    statement = statement.order_by(desc(PostCore.created_at)).offset(skip).limit(limit)
     posts_core = session.exec(statement).all()
     
     response_list = []

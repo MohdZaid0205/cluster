@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
-from api.routers import users, clusters, posts, comments
+from api.routers import users, clusters, posts, comments, triggers
 from api.database import engine
 
 # Make sure all models are imported so SQLModel knows about them (only needed if we create tables here, but we are connecting to existing)
@@ -28,6 +28,7 @@ app.include_router(users.router)
 app.include_router(clusters.router)
 app.include_router(posts.router)
 app.include_router(comments.router)
+app.include_router(triggers.router)
 
 # Mount the Static HTML/CSS/JS frontend application
 # Base directory is one level up from "api" (where "app" is located)
