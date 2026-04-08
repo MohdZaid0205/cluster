@@ -7,6 +7,7 @@ from api.database import get_session
 from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember
 from api.schemas.cluster import ClusterCreate, ClusterResponse, ClusterDetailResponse, ClusterMemberCreate
 from api.services.cluster_service import ClusterService
+from api.security import get_current_uid
 
 router = APIRouter(prefix="/clusters", tags=["Clusters"])
 
@@ -66,3 +67,44 @@ def list_clusters(skip: int = 0, limit: int = 100, category: str = None, session
     statement = statement.offset(skip).limit(limit)
     clusters = session.exec(statement).all()
     return clusters
+
+# ---- Membership endpoints (auth required) -----------------------------------
+
+@router.post("/{cid}/join")
+def join_cluster(
+    cid: UUID,
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Adds the authenticated user as a member of the specified cluster.
+    The trg_increment_member_count trigger updates ClusterStats automatically.
+    """
+    # Check cluster exists
+    cluster = session.get(ClusterCore, cid)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    # Check not already a member
+    existing = ClusterService.check_user_membership(session, cid, uid)
+    if existing:
+        raise HTTPException(status_code=400, detail="Already a member of this cluster")
+
+    ClusterService.add_user_to_cluster(session, cid, uid, role="MEMBER")
+    return {"message": "Joined cluster successfully"}
+
+
+@router.delete("/{cid}/leave")
+def leave_cluster(
+    cid: UUID,
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Removes the authenticated user from the specified cluster.
+    The trg_decrement_member_count trigger updates ClusterStats automatically.
+    """
+    removed = ClusterService.remove_user_from_cluster(session, cid, uid)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    return {"message": "Left cluster successfully"}

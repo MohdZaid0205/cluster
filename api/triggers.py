@@ -2,6 +2,9 @@
 api/triggers.py
 
 Triggers defined here mirror archive/research/Triggers.sql exactly.
+Registration is wrapped in a try/except so the engine can start even
+if the tables haven't been created yet (triggers are re-applied on
+every new DBAPI connection, so they'll succeed after create_all).
 """
 
 from sqlalchemy import event, text
@@ -83,13 +86,19 @@ def register_triggers(engine: Engine) -> None:
     Uses the `connect` event so that every new raw DBAPI connection
     (including StaticPool test connections) gets the triggers applied
     immediately after the schema tables exist.
+
+    Silently ignores errors if tables don't exist yet – they'll be
+    retried on the next connection after create_all runs.
     """
 
     @event.listens_for(engine, "connect")
     def _apply_triggers(dbapi_conn, connection_record):
         cursor = dbapi_conn.cursor()
         for ddl in _ALL_TRIGGERS:
-            cursor.execute(ddl)
+            try:
+                cursor.execute(ddl)
+            except Exception:
+                pass  # table doesn't exist yet, will retry on next connection
         cursor.close()
 
 
