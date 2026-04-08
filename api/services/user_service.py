@@ -168,44 +168,53 @@ class UserService:
         Simulates the verification of an account via updating email and boolean flag.
         Maps to: USER VERIFIES HIMSELF AND NOW WE ADD HIS VERIFICATION INFORMATION
         """
-        statement = (
-            update(UserAuth)
-            .where(UserAuth.uid == uid)
-            .values(email=new_email, is_verified=True)
-        )
-        session.exec(statement)
-        session.commit()
-        return True
+        try:
+            statement = (
+                update(UserAuth)
+                .where(UserAuth.uid == uid)
+                .values(email=new_email, is_verified=True)
+            )
+            session.exec(statement)
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
 
     @staticmethod
     def register_user(session: Session, user_in):
         """
         Registers a new identity and constructs their public profile skeleton.
+        Uses a transaction to ensure both UserAuth and UserProfile are created
+        atomically — rollback if either fails.
         """
-        # Hash the incoming plain text password before persistence
-        hashed_password = get_password_hash(user_in.password)
-        
-        auth_user = UserAuth(
-            email         = user_in.email,
-            phone         = user_in.phone,
-            password_hash = hashed_password,
-            role          = user_in.role
-        )
-        session.add(auth_user)
-        session.flush()
+        try:
+            hashed_password = get_password_hash(user_in.password)
+            
+            auth_user = UserAuth(
+                email         = user_in.email,
+                phone         = user_in.phone,
+                password_hash = hashed_password,
+                role          = user_in.role
+            )
+            session.add(auth_user)
+            session.flush()
 
-        profile = UserProfile(
-            uid      = auth_user.uid,
-            name     = user_in.name,
-            bio      = user_in.bio,
-            location = user_in.location
-        )
-        session.add(profile)
-        session.commit()
-        session.refresh(auth_user)
-        session.refresh(profile)
+            profile = UserProfile(
+                uid      = auth_user.uid,
+                name     = user_in.name,
+                bio      = user_in.bio,
+                location = user_in.location
+            )
+            session.add(profile)
+            session.commit()
+            session.refresh(auth_user)
+            session.refresh(profile)
 
-        return auth_user, profile
+            return auth_user, profile
+        except Exception:
+            session.rollback()
+            raise
 
     @staticmethod
     def update_user_profile(session: Session, uid: UUID, update_data: dict):
@@ -215,14 +224,18 @@ class UserService:
         profile = session.get(UserProfile, uid)
         if not profile: return None
         
-        for key, value in update_data.items():
-            if hasattr(profile, key) and value is not None:
-                setattr(profile, key, value)
-                
-        session.add(profile)
-        session.commit()
-        session.refresh(profile)
-        return profile
+        try:
+            for key, value in update_data.items():
+                if hasattr(profile, key) and value is not None:
+                    setattr(profile, key, value)
+                    
+            session.add(profile)
+            session.commit()
+            session.refresh(profile)
+            return profile
+        except Exception:
+            session.rollback()
+            raise
 
     @staticmethod
     def delete_user_account(session: Session, uid: UUID):
@@ -231,6 +244,10 @@ class UserService:
         """
         auth = session.get(UserAuth, uid)
         if not auth: return False
-        session.delete(auth)
-        session.commit()
-        return True
+        try:
+            session.delete(auth)
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise

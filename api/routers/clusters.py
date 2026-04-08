@@ -78,20 +78,18 @@ def join_cluster(
 ):
     """
     Adds the authenticated user as a member of the specified cluster.
-    The trg_increment_member_count trigger updates ClusterStats automatically.
+    Idempotent — returns success even if already a member.
     """
-    # Check cluster exists
     cluster = session.get(ClusterCore, cid)
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
 
-    # Check not already a member
     existing = ClusterService.check_user_membership(session, cid, uid)
     if existing:
-        raise HTTPException(status_code=400, detail="Already a member of this cluster")
+        return {"message": "Already a member of this cluster", "already_member": True}
 
     ClusterService.add_user_to_cluster(session, cid, uid, role="MEMBER")
-    return {"message": "Joined cluster successfully"}
+    return {"message": "Joined cluster successfully", "already_member": False}
 
 
 @router.delete("/{cid}/leave")

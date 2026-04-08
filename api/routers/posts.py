@@ -61,7 +61,7 @@ def list_posts(skip: int = 0, limit: int = 100, cid: Optional[UUID] = None, sess
     if cid:
         statement = statement.where(PostCore.cid == cid)
     
-    statement = statement.offset(skip).limit(limit)
+    statement = statement.order_by(PostCore.created_at.desc()).offset(skip).limit(limit)
     posts_core = session.exec(statement).all()
     
     response_list = []
