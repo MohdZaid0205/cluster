@@ -96,27 +96,31 @@ class CommentService:
         Spawns a new comment entity and its content text.
         CommentStats is auto-created by the trg_init_comment_stats trigger.
         """
-        core_comment = CommentCore(
-            uid        = comment_in.uid,
-            pid        = comment_in.pid,
-            parent_mid = comment_in.parent_mid
-        )
-        session.add(core_comment)
-        session.flush()  # generate mid before FK inserts
+        try:
+            core_comment = CommentCore(
+                uid        = comment_in.uid,
+                pid        = comment_in.pid,
+                parent_mid = comment_in.parent_mid
+            )
+            session.add(core_comment)
+            session.flush()  # generate mid before FK inserts
 
-        content = CommentContent(
-            mid     = core_comment.mid,
-            content = comment_in.content
-        )
-        session.add(content)
-        session.commit()          # trigger fires here, creating CommentStats
-        session.expire_all()      # clear cache so we see trigger-created rows
+            content = CommentContent(
+                mid     = core_comment.mid,
+                content = comment_in.content
+            )
+            session.add(content)
+            session.commit()          # trigger fires here, creating CommentStats
+            session.expire_all()      # clear cache so we see trigger-created rows
 
-        session.refresh(core_comment)
-        session.refresh(content)
-        stats = session.get(CommentStats, core_comment.mid)
+            session.refresh(core_comment)
+            session.refresh(content)
+            stats = session.get(CommentStats, core_comment.mid)
 
-        return core_comment, content, stats
+            return core_comment, content, stats
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     def delete_comment(session: Session, mid: UUID):
@@ -134,22 +138,26 @@ class CommentService:
         """
         Appends or updates a user rating action on a specific comment.
         """
-        existing_Reaction = session.exec(select(CommentReaction).where(CommentReaction.mid == mid, CommentReaction.uid == uid)).first()
-        stats = session.get(CommentStats, mid)
-        
-        if existing_Reaction:
-            if existing_Reaction.reaction_type == reaction_type:
-                return existing_Reaction
-            if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
-            elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
-            session.delete(existing_Reaction)
-        
-        reaction = CommentReaction(mid=mid, uid=uid, reaction_type=reaction_type)
-        session.add(reaction)
-        
-        if reaction_type.name == "LIKE" and stats: stats.likes += 1
-        elif reaction_type.name == "DISLIKE" and stats: stats.dislikes += 1
-        if stats: session.add(stats)
-        
-        session.commit()
-        return reaction
+        try:
+            existing_Reaction = session.exec(select(CommentReaction).where(CommentReaction.mid == mid, CommentReaction.uid == uid)).first()
+            stats = session.get(CommentStats, mid)
+            
+            if existing_Reaction:
+                if existing_Reaction.reaction_type == reaction_type:
+                    return existing_Reaction
+                if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
+                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
+                session.delete(existing_Reaction)
+            
+            reaction = CommentReaction(mid=mid, uid=uid, reaction_type=reaction_type)
+            session.add(reaction)
+            
+            if reaction_type.name == "LIKE" and stats: stats.likes += 1
+            elif reaction_type.name == "DISLIKE" and stats: stats.dislikes += 1
+            if stats: session.add(stats)
+            
+            session.commit()
+            return reaction
+        except Exception as e:
+            session.rollback()
+            raise e

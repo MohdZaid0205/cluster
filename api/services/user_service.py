@@ -185,27 +185,31 @@ class UserService:
         # Hash the incoming plain text password before persistence
         hashed_password = get_password_hash(user_in.password)
         
-        auth_user = UserAuth(
-            email         = user_in.email,
-            phone         = user_in.phone,
-            password_hash = hashed_password,
-            role          = user_in.role
-        )
-        session.add(auth_user)
-        session.flush()
+        try:
+            auth_user = UserAuth(
+                email         = user_in.email,
+                phone         = user_in.phone,
+                password_hash = hashed_password,
+                role          = user_in.role
+            )
+            session.add(auth_user)
+            session.flush()
 
-        profile = UserProfile(
-            uid      = auth_user.uid,
-            name     = user_in.name,
-            bio      = user_in.bio,
-            location = user_in.location
-        )
-        session.add(profile)
-        session.commit()
-        session.refresh(auth_user)
-        session.refresh(profile)
+            profile = UserProfile(
+                uid      = auth_user.uid,
+                name     = user_in.name,
+                bio      = user_in.bio,
+                location = user_in.location
+            )
+            session.add(profile)
+            session.commit()
+            session.refresh(auth_user)
+            session.refresh(profile)
 
-        return auth_user, profile
+            return auth_user, profile
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     def update_user_profile(session: Session, uid: UUID, update_data: dict):
