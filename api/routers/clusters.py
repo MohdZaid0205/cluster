@@ -84,12 +84,16 @@ def join_cluster(
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
 
-    existing = ClusterService.check_user_membership(session, cid, uid)
-    if existing:
-        return {"message": "Already a member of this cluster", "already_member": True}
-
-    ClusterService.add_user_to_cluster(session, cid, uid, role="MEMBER")
-    return {"message": "Joined cluster successfully", "already_member": False}
+    _member, created = ClusterService.add_user_to_cluster(
+        session,
+        cid,
+        uid,
+        role="MEMBER",
+        return_created=True,
+    )
+    if created:
+        return {"message": "Joined cluster successfully", "already_member": False}
+    return {"message": "Already a member of this cluster", "already_member": True}
 
 
 @router.delete("/{cid}/leave")

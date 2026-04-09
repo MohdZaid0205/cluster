@@ -11,7 +11,6 @@ from api.services.user_service import UserService
 from api.security import (
     create_access_token,
     get_current_uid,
-    verify_password,
 )
 
 router = APIRouter(prefix="/users", tags=["Users"])

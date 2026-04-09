@@ -1,3 +1,6 @@
+import time
+
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select, func, desc
 from typing import List, Optional
 from uuid import UUID
@@ -253,16 +256,47 @@ class ClusterService:
         return True
 
     @staticmethod
-    def add_user_to_cluster(session: Session, cid: UUID, uid: UUID, role: str = "MEMBER"):
+    def add_user_to_cluster(
+        session: Session,
+        cid: UUID,
+        uid: UUID,
+        role: str = "MEMBER",
+        return_created: bool = False,
+        max_retries: int = 3,
+    ):
         """
-        Joins a user to a cluster.
+        Joins a user to a cluster in an idempotent, concurrency-safe way.
         ClusterStats.member_count is incremented by trg_increment_member_count.
+
+        Returns the member row by default (backward-compatible).
+        If return_created=True, returns (member, created) where created indicates
+        whether this call inserted a new membership row.
         """
-        member = ClusterMember(cid=cid, uid=uid, role=role)
-        session.add(member)
-        session.commit()
-        session.expire_all()
-        return member
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                member = ClusterMember(cid=cid, uid=uid, role=role)
+                session.add(member)
+                session.commit()
+                session.expire_all()
+                if return_created:
+                    return member, True
+                return member
+            except IntegrityError:
+                # Duplicate (cid, uid) under races is expected and should not 500.
+                session.rollback()
+                existing = ClusterService.check_user_membership(session, cid, uid)
+                if return_created:
+                    return existing, False
+                return existing
+            except OperationalError as exc:
+                session.rollback()
+                if "database is locked" in str(exc).lower() and attempt < max_retries:
+                    # Brief backoff allows the current writer to finish.
+                    time.sleep(0.03 * attempt)
+                    continue
+                raise
 
     @staticmethod
     def remove_user_from_cluster(session: Session, cid: UUID, uid: UUID):

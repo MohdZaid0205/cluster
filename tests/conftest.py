@@ -1,8 +1,15 @@
 import pytest
+import sys
+from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 from uuid import uuid4
+
+# Ensure `api` package is importable even when pytest is run from workspace root.
+CLUSTER_ROOT = Path(__file__).resolve().parents[1]
+if str(CLUSTER_ROOT) not in sys.path:
+    sys.path.insert(0, str(CLUSTER_ROOT))
 
 from api.main import app
 from api.database import get_session
