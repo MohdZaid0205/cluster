@@ -11,10 +11,10 @@ from api.database import engine
 
 app = FastAPI(title="Cluster API", version="1.0.0", description="Backend API for the Cluster application.")
 
-# CORS – allow the Vite dev-server (and any localhost origin) to reach the API
+# CORS – allow any client to connect for multi-user capabilities
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://[::]:8080"],
+    allow_origins=["*"], # changed from localhost specifically to asterisk to allow everyone on your IP address to connect
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,3 +40,8 @@ if os.path.isdir(WEB_DIR):
 @app.get("/")
 def root():
     return {"message": "Welcome to the Cluster API", "status": "ok", "ui_url": "/web"}
+
+if __name__ == "__main__":
+    import uvicorn
+    # Running on 0.0.0.0 allows connections from other users/devices on the same network
+    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)

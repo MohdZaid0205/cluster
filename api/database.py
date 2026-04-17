@@ -34,10 +34,21 @@ else:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     
     DATABASE_URL = f"sqlite:///{DB_PATH}"
-    engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+    # check_same_thread=False allows FastAPI multithreading. timeout=15 helps prevent locks during concurrent writes.
+    engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False, "timeout": 15})
     _sqlite = True
 
 if _sqlite:
+    from sqlalchemy import event
+    
+    # Enable WAL mode and relax synchronous parsing allows concurrent reads and writes
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
     from api.triggers import register_triggers
     register_triggers(engine)
 
