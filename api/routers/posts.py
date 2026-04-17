@@ -87,9 +87,10 @@ def list_posts(skip: int = 0, limit: int = 100, cid: Optional[UUID] = None, sess
 def react_to_post(pid: UUID, reaction_in: PostReactionCreate, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
     """
     Registers a user's reaction to a specific post.
+    Returns updated likes, dislikes, and the user's current reaction.
     """
-    PostService.add_reaction_to_post(session, pid, current_user.uid, reaction_in.reaction_type)
-    return {"message": "Reaction recorded successfully"}
+    result = PostService.add_reaction_to_post(session, pid, current_user.uid, reaction_in.reaction_type)
+    return result
 
 @router.delete("/{pid}")
 def delete_post(pid: UUID, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
@@ -105,11 +106,20 @@ def delete_post(pid: UUID, session: Session = Depends(get_session), current_user
 def remove_reaction(pid: UUID, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
     """
     Removes the current user's reaction from a post.
+    Returns updated likes, dislikes, and current_reaction=null.
     """
-    success = PostService.remove_reaction_from_post(session, pid, current_user.uid)
-    if not success:
+    result = PostService.remove_reaction_from_post(session, pid, current_user.uid)
+    if not result:
         raise HTTPException(status_code=404, detail="Reaction not found")
-    return {"message": "Reaction removed successfully"}
+    return result
+
+@router.get("/{pid}/reaction/me", response_model=Any)
+def get_my_reaction(pid: UUID, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
+    """
+    Returns the current user's reaction on a post, or null if none exists.
+    """
+    reaction = PostService.get_user_reaction_to_post(session, pid, current_user.uid)
+    return {"reaction": reaction}
 
 @router.get("/me/feed", response_model=List[Any])
 def get_my_homepage_feed(limit: int = 50, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):

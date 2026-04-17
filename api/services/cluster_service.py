@@ -1,8 +1,9 @@
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select, func, desc
 from typing import List, Optional
 from uuid import UUID
 
-from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember, ClusterModerator, ClusterRule
+from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember, ClusterModerator, ClusterRule, ClusterBookmark
 from api.models.user import UserProfile
 from api.models.post import PostCore
 
@@ -262,11 +263,21 @@ class ClusterService:
         Joins a user to a cluster.
         ClusterStats.member_count is incremented by trg_increment_member_count.
         """
-        member = ClusterMember(cid=cid, uid=uid, role=role)
-        session.add(member)
-        session.commit()
-        session.expire_all()
-        return member
+        existing = session.exec(select(ClusterMember).where(ClusterMember.cid == cid, ClusterMember.uid == uid)).first()
+        if existing:
+            return existing
+
+        try:
+            member = ClusterMember(cid=cid, uid=uid, role=role)
+            session.add(member)
+            session.commit()
+            return member
+        except IntegrityError:
+            session.rollback()
+            existing = session.exec(select(ClusterMember).where(ClusterMember.cid == cid, ClusterMember.uid == uid)).first()
+            if existing:
+                return existing
+            raise
 
     @staticmethod
     def remove_user_from_cluster(session: Session, cid: UUID, uid: UUID):
@@ -282,3 +293,95 @@ class ClusterService:
             session.expire_all()
             return True
         return False
+
+    @staticmethod
+    def get_user_joined_cluster_ids(session: Session, uid: UUID) -> List[str]:
+        """
+        Returns the list of cluster IDs (as strings) the user is currently a member of.
+        """
+        statement = select(ClusterMember.cid).where(ClusterMember.uid == uid)
+        rows = session.exec(statement).all()
+        return [str(cid) for cid in rows]
+
+    @staticmethod
+    def bookmark_cluster(session: Session, uid: UUID, cid: UUID):
+        """
+        Creates a bookmark record for a user-cluster pair.  Idempotent.
+        """
+        existing = session.exec(
+            select(ClusterBookmark).where(ClusterBookmark.uid == uid, ClusterBookmark.cid == cid)
+        ).first()
+        if existing:
+            return existing
+        bookmark = ClusterBookmark(uid=uid, cid=cid)
+        session.add(bookmark)
+        session.commit()
+        session.refresh(bookmark)
+        return bookmark
+
+    @staticmethod
+    def unbookmark_cluster(session: Session, uid: UUID, cid: UUID) -> bool:
+        """
+        Removes a bookmark for a user-cluster pair.
+        """
+        existing = session.exec(
+            select(ClusterBookmark).where(ClusterBookmark.uid == uid, ClusterBookmark.cid == cid)
+        ).first()
+        if existing:
+            session.delete(existing)
+            session.commit()
+            return True
+        return False
+
+    @staticmethod
+    def get_user_bookmarked_clusters(session: Session, uid: UUID):
+        """
+        Returns bookmarked clusters with name, category, bookmark timestamp,
+        chat_enabled flag, and whether the user is a member.
+        """
+        statement = (
+            select(
+                ClusterBookmark.cid,
+                ClusterCore.name,
+                ClusterCore.category,
+                ClusterBookmark.bookmarked_at,
+                ClusterBookmark.chat_enabled,
+            )
+            .join(ClusterCore, ClusterBookmark.cid == ClusterCore.cid)
+            .where(ClusterBookmark.uid == uid)
+            .order_by(desc(ClusterBookmark.bookmarked_at))
+        )
+        rows = session.exec(statement).all()
+
+        # Fetch user's membership CIDs once for efficient lookup
+        member_cids = set(
+            session.exec(select(ClusterMember.cid).where(ClusterMember.uid == uid)).all()
+        )
+
+        return [
+            {
+                "cid": str(row[0]),
+                "name": row[1],
+                "category": row[2],
+                "bookmarked_at": str(row[3]),
+                "chat_enabled": row[4],
+                "is_member": row[0] in member_cids,
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def set_cluster_chat_option(session: Session, uid: UUID, cid: UUID, chat_enabled: bool):
+        """
+        Updates the per-user chat preference for a bookmarked cluster.
+        """
+        bookmark = session.exec(
+            select(ClusterBookmark).where(ClusterBookmark.uid == uid, ClusterBookmark.cid == cid)
+        ).first()
+        if not bookmark:
+            return None
+        bookmark.chat_enabled = chat_enabled
+        session.add(bookmark)
+        session.commit()
+        session.refresh(bookmark)
+        return bookmark

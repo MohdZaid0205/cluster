@@ -2,15 +2,41 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 from typing import List, Any, Optional
 from uuid import UUID
+from pydantic import BaseModel
 
 from api.database import get_session
-from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember
+from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember, ClusterBookmark
 from api.schemas.cluster import ClusterCreate, ClusterResponse, ClusterDetailResponse, ClusterMemberCreate
 from api.services.cluster_service import ClusterService
 from api.models.user import UserAuth
 from api.auth import get_current_user
 
 router = APIRouter(prefix="/clusters", tags=["Clusters"])
+
+
+# ---- Pydantic bodies for new endpoints ------------------------------------
+
+class ChatOptionPayload(BaseModel):
+    chat_enabled: bool
+
+
+# ---- Static-path endpoints (must be before /{cid} routes) -----------------
+
+@router.get("/memberships/me", response_model=Any)
+def get_my_memberships(session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
+    """
+    Returns a list of cluster IDs the authenticated user has joined.
+    """
+    cluster_ids = ClusterService.get_user_joined_cluster_ids(session, current_user.uid)
+    return {"cluster_ids": cluster_ids}
+
+@router.get("/bookmarks/me", response_model=List[Any])
+def get_my_bookmarks(session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
+    """
+    Returns all clusters the authenticated user has bookmarked,
+    enriched with membership status and chat preferences.
+    """
+    return ClusterService.get_user_bookmarked_clusters(session, current_user.uid)
 
 @router.post("/", response_model=ClusterDetailResponse)
 def create_cluster(cluster_in: ClusterCreate, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
@@ -85,9 +111,6 @@ def join_cluster(cid: UUID, session: Session = Depends(get_session), current_use
     """
     Allows the authenticated user to join a cluster.
     """
-    # Check if already a member
-    if ClusterService.check_user_membership(session, cid, current_user.uid):
-        raise HTTPException(status_code=400, detail="User already in cluster")
     ClusterService.add_user_to_cluster(session, cid, current_user.uid)
     return {"message": "Joined cluster successfully"}
 
@@ -100,6 +123,34 @@ def leave_cluster(cid: UUID, session: Session = Depends(get_session), current_us
     if not success:
         raise HTTPException(status_code=404, detail="Not a member of this cluster")
     return {"message": "Left cluster successfully"}
+
+@router.post("/{cid}/bookmark")
+def bookmark_cluster(cid: UUID, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
+    """
+    Bookmarks a cluster for the authenticated user. Idempotent.
+    """
+    ClusterService.bookmark_cluster(session, current_user.uid, cid)
+    return {"message": "Cluster bookmarked successfully"}
+
+@router.delete("/{cid}/bookmark")
+def unbookmark_cluster(cid: UUID, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
+    """
+    Removes a cluster bookmark for the authenticated user.
+    """
+    success = ClusterService.unbookmark_cluster(session, current_user.uid, cid)
+    if not success:
+        raise HTTPException(status_code=404, detail="Bookmark not found")
+    return {"message": "Bookmark removed successfully"}
+
+@router.put("/{cid}/chat-options")
+def set_chat_option(cid: UUID, payload: ChatOptionPayload, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
+    """
+    Updates the per-user chat preference for a bookmarked cluster.
+    """
+    result = ClusterService.set_cluster_chat_option(session, current_user.uid, cid, payload.chat_enabled)
+    if not result:
+        raise HTTPException(status_code=404, detail="Bookmark not found – bookmark the cluster first")
+    return {"message": "Chat option updated", "chat_enabled": result.chat_enabled}
 
 @router.get("/public/popular", response_model=List[Any])
 def get_popular_public_clusters(limit: int = 10, session: Session = Depends(get_session)):

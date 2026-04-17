@@ -1,6 +1,6 @@
 import pytest
 from uuid import uuid4
-from sqlmodel import Session
+from sqlmodel import Session, select
 from api.services.post_service import PostService
 from api.services.cluster_service import ClusterService
 from api.models.post import PostCore, PostContent, PostStats, PostType, PostReaction
@@ -50,7 +50,7 @@ def test_add_and_remove_reaction(session: Session, test_post, test_user):
     # Add LIKE
     reaction = PostService.add_reaction_to_post(session, test_post.pid, test_user.uid, ReactionType.LIKE)
     assert reaction is not None
-    assert reaction.reaction_type == ReactionType.LIKE
+    assert reaction["current_reaction"] == "LIKE"
     
     # Check stats
     stats = session.get(PostStats, test_post.pid)
@@ -58,13 +58,33 @@ def test_add_and_remove_reaction(session: Session, test_post, test_user):
     
     # Change to DISLIKE
     reaction = PostService.add_reaction_to_post(session, test_post.pid, test_user.uid, ReactionType.DISLIKE)
-    assert reaction.reaction_type == ReactionType.DISLIKE
+    assert reaction["current_reaction"] == "DISLIKE"
     stats = session.get(PostStats, test_post.pid)
     assert stats.likes == 0
     assert stats.dislikes == 1
     
     # Remove
     success = PostService.remove_reaction_from_post(session, test_post.pid, test_user.uid)
-    assert success is True
+    assert success is not None
+    assert success["current_reaction"] is None
     stats = session.get(PostStats, test_post.pid)
+    assert stats.dislikes == 0
+
+def test_add_reaction_to_post_duplicate_is_idempotent(session: Session, test_post, test_user):
+    first = PostService.add_reaction_to_post(session, test_post.pid, test_user.uid, ReactionType.LIKE)
+    second = PostService.add_reaction_to_post(session, test_post.pid, test_user.uid, ReactionType.LIKE)
+
+    assert first["current_reaction"] == "LIKE"
+    assert second["current_reaction"] == "LIKE"
+
+    reactions = session.exec(
+        select(PostReaction).where(
+            PostReaction.pid == test_post.pid,
+            PostReaction.uid == test_user.uid,
+        )
+    ).all()
+    assert len(reactions) == 1
+
+    stats = session.get(PostStats, test_post.pid)
+    assert stats.likes == 1
     assert stats.dislikes == 0

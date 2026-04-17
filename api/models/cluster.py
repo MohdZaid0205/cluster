@@ -70,3 +70,14 @@ class ClusterRule(SQLModel, table=True):
     pattern     : str                                                                     # Regex or logical pattern to match against
     action      : RuleAction                                                              # Action taken when rule is matched
     description : Optional[str]  = None                                                   # Expanded explanation of the rule's purpose
+
+class ClusterBookmark(SQLModel, table=True):
+    """
+    Represents a user's bookmark on a cluster, optionally with a per-user chat preference.
+    """
+    __table_args__ = {"extend_existing": True}
+
+    uid          : UUID           = Field(primary_key=True, foreign_key="userauth.uid")    # User who bookmarked
+    cid          : UUID           = Field(primary_key=True, foreign_key="clustercore.cid") # Bookmarked cluster
+    bookmarked_at: datetime       = Field(default_factory=lambda: datetime.now())          # Timestamp when bookmarked
+    chat_enabled : bool           = Field(default=False)                                   # Per-user chat preference

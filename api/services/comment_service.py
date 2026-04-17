@@ -1,8 +1,10 @@
-from sqlmodel import Session, select
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select, update
 from typing import List, Optional
 from uuid import UUID
 
 from api.models.comment import CommentCore, CommentContent, CommentStats, CommentReaction
+from api.models.post import PostCore
 from api.models.user import UserProfile
 from api.models.enums import ReactionType
 
@@ -97,10 +99,27 @@ class CommentService:
         CommentStats is auto-created by the trg_init_comment_stats trigger.
         """
         try:
+            pid = comment_in.pid
+            parent_mid = comment_in.parent_mid
+
+            if not pid and not parent_mid:
+                raise ValueError("Comment must belong to a post or another comment")
+
+            if parent_mid:
+                parent_comment = session.get(CommentCore, parent_mid)
+                if not parent_comment:
+                    raise ValueError("Parent comment not found")
+                if pid and parent_comment.pid != pid:
+                    raise ValueError("Reply post id does not match parent comment")
+                pid = parent_comment.pid
+
+            if not pid or not session.get(PostCore, pid):
+                raise ValueError("Post not found")
+
             core_comment = CommentCore(
                 uid        = comment_in.uid,
-                pid        = comment_in.pid,
-                parent_mid = comment_in.parent_mid
+                pid        = pid,
+                parent_mid = parent_mid
             )
             session.add(core_comment)
             session.flush()  # generate mid before FK inserts
@@ -111,10 +130,6 @@ class CommentService:
             )
             session.add(content)
             session.commit()          # trigger fires here, creating CommentStats
-            session.expire_all()      # clear cache so we see trigger-created rows
-
-            session.refresh(core_comment)
-            session.refresh(content)
             stats = session.get(CommentStats, core_comment.mid)
 
             return core_comment, content, stats
@@ -145,19 +160,25 @@ class CommentService:
             if existing_Reaction:
                 if existing_Reaction.reaction_type == reaction_type:
                     return existing_Reaction
-                if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
-                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
+                if existing_Reaction.reaction_type.name == "LIKE" and stats:
+                    session.exec(update(CommentStats).where(CommentStats.mid == mid).values(likes=CommentStats.likes - 1))
+                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats:
+                    session.exec(update(CommentStats).where(CommentStats.mid == mid).values(dislikes=CommentStats.dislikes - 1))
                 session.delete(existing_Reaction)
             
             reaction = CommentReaction(mid=mid, uid=uid, reaction_type=reaction_type)
             session.add(reaction)
             
-            if reaction_type.name == "LIKE" and stats: stats.likes += 1
-            elif reaction_type.name == "DISLIKE" and stats: stats.dislikes += 1
-            if stats: session.add(stats)
+            if reaction_type.name == "LIKE" and stats:
+                session.exec(update(CommentStats).where(CommentStats.mid == mid).values(likes=CommentStats.likes + 1))
+            elif reaction_type.name == "DISLIKE" and stats:
+                session.exec(update(CommentStats).where(CommentStats.mid == mid).values(dislikes=CommentStats.dislikes + 1))
             
             session.commit()
             return reaction
+        except IntegrityError:
+            session.rollback()
+            return session.exec(select(CommentReaction).where(CommentReaction.mid == mid, CommentReaction.uid == uid)).first()
         except Exception as e:
             session.rollback()
             raise e

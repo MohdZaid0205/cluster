@@ -1,6 +1,6 @@
 import pytest
 from uuid import uuid4
-from sqlmodel import Session
+from sqlmodel import Session, select
 from api.services.cluster_service import ClusterService
 from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember
 from api.models.user import UserAuth, UserProfile, UserRole
@@ -72,3 +72,26 @@ def test_add_and_remove_user_from_cluster(session: Session, test_cluster):
     # Check stats decreased
     stats = session.get(ClusterStats, test_cluster.cid)
     assert stats.member_count == 1
+
+def test_add_user_to_cluster_duplicate_is_idempotent(session: Session, test_cluster):
+    new_uid = uuid4()
+    user = UserAuth(uid=new_uid, email="user3@example.com", password_hash="hash", role=UserRole.MEMBER)
+    session.add(user)
+    session.commit()
+
+    first = ClusterService.add_user_to_cluster(session, test_cluster.cid, new_uid)
+    second = ClusterService.add_user_to_cluster(session, test_cluster.cid, new_uid)
+
+    assert first is not None
+    assert second is not None
+
+    member_rows = session.exec(
+        select(ClusterMember).where(
+            ClusterMember.cid == test_cluster.cid,
+            ClusterMember.uid == new_uid,
+        )
+    ).all()
+    assert len(member_rows) == 1
+
+    stats = session.get(ClusterStats, test_cluster.cid)
+    assert stats.member_count == 2

@@ -23,6 +23,11 @@ app.add_middleware(
 # Note: We do not call SQLModel.metadata.create_all(engine) because the database
 # already exists and is populated via `archive/research/populate.py`. 
 # We are just connecting to existing `temp/db/research.db`!
+# However, we DO create any NEW tables (e.g. ClusterBookmark) that were added
+# after the initial population script.
+
+from api.models.cluster import ClusterBookmark
+ClusterBookmark.__table__.create(engine, checkfirst=True)
 
 app.include_router(users.router)
 app.include_router(clusters.router)

@@ -1,4 +1,5 @@
-from sqlmodel import Session, select, func, desc, or_
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select, func, desc, or_, update
 from typing import List, Optional
 from datetime import datetime
 from uuid import UUID
@@ -200,10 +201,6 @@ class PostService:
             )
             session.add(content)
             session.commit()          # trigger fires here, creating PostStats
-            session.expire_all()      # clear cache so we see trigger-created rows
-
-            session.refresh(core_post)
-            session.refresh(content)
             stats = session.get(PostStats, core_post.pid)
 
             return core_post, content, stats
@@ -226,6 +223,7 @@ class PostService:
     def add_reaction_to_post(session: Session, pid: UUID, uid: UUID, reaction_type):
         """
         Registers a reaction and updates the aggregated statistics payload.
+        Returns a dict with updated likes, dislikes, and current_reaction.
         """
         try:
             # Ensure only 1 reaction per user per post exists by clearing previous
@@ -234,21 +232,46 @@ class PostService:
             
             if existing_Reaction:
                 if existing_Reaction.reaction_type == reaction_type:
-                    return existing_Reaction # No change
+                    # No change — return current state
+                    return {
+                        "likes": stats.likes if stats else 0,
+                        "dislikes": stats.dislikes if stats else 0,
+                        "current_reaction": existing_Reaction.reaction_type.name,
+                    }
                 # Decrease old stat counter
-                if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
-                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
+                if existing_Reaction.reaction_type.name == "LIKE" and stats:
+                    session.exec(update(PostStats).where(PostStats.pid == pid).values(likes=PostStats.likes - 1))
+                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats:
+                    session.exec(update(PostStats).where(PostStats.pid == pid).values(dislikes=PostStats.dislikes - 1))
                 session.delete(existing_Reaction)
             
             reaction = PostReaction(pid=pid, uid=uid, reaction_type=reaction_type)
             session.add(reaction)
             
-            if reaction_type.name == "LIKE" and stats: stats.likes += 1
-            elif reaction_type.name == "DISLIKE" and stats: stats.dislikes += 1
-            
-            if stats: session.add(stats)
+            if reaction_type.name == "LIKE" and stats:
+                session.exec(update(PostStats).where(PostStats.pid == pid).values(likes=PostStats.likes + 1))
+            elif reaction_type.name == "DISLIKE" and stats:
+                session.exec(update(PostStats).where(PostStats.pid == pid).values(dislikes=PostStats.dislikes + 1))
+
             session.commit()
-            return reaction
+            fresh_stats = session.get(PostStats, pid)
+
+            return {
+                "likes": fresh_stats.likes if fresh_stats else 0,
+                "dislikes": fresh_stats.dislikes if fresh_stats else 0,
+                "current_reaction": reaction_type.name,
+            }
+        except IntegrityError:
+            session.rollback()
+            existing = session.exec(select(PostReaction).where(PostReaction.pid == pid, PostReaction.uid == uid)).first()
+            fresh_stats = session.get(PostStats, pid)
+            if existing:
+                return {
+                    "likes": fresh_stats.likes if fresh_stats else 0,
+                    "dislikes": fresh_stats.dislikes if fresh_stats else 0,
+                    "current_reaction": existing.reaction_type.name,
+                }
+            raise
         except Exception as e:
             session.rollback()
             raise e
@@ -257,18 +280,37 @@ class PostService:
     def remove_reaction_from_post(session: Session, pid: UUID, uid: UUID):
         """
         Unregisters a user's reaction from a post and decrements stats.
+        Returns a dict with updated likes, dislikes, and current_reaction=None.
         """
         try:
             existing_Reaction = session.exec(select(PostReaction).where(PostReaction.pid == pid, PostReaction.uid == uid)).first()
             if existing_Reaction:
                 stats = session.get(PostStats, pid)
-                if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
-                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
-                if stats: session.add(stats)
+                if existing_Reaction.reaction_type.name == "LIKE" and stats:
+                    session.exec(update(PostStats).where(PostStats.pid == pid).values(likes=PostStats.likes - 1))
+                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats:
+                    session.exec(update(PostStats).where(PostStats.pid == pid).values(dislikes=PostStats.dislikes - 1))
                 session.delete(existing_Reaction)
                 session.commit()
-                return True
-            return False
+                fresh_stats = session.get(PostStats, pid)
+                return {
+                    "likes": fresh_stats.likes if fresh_stats else 0,
+                    "dislikes": fresh_stats.dislikes if fresh_stats else 0,
+                    "current_reaction": None,
+                }
+            return None
         except Exception as e:
             session.rollback()
             raise e
+
+    @staticmethod
+    def get_user_reaction_to_post(session: Session, pid: UUID, uid: UUID):
+        """
+        Returns the current user's reaction type on a post, or None.
+        """
+        reaction = session.exec(
+            select(PostReaction).where(PostReaction.pid == pid, PostReaction.uid == uid)
+        ).first()
+        if reaction:
+            return reaction.reaction_type.name
+        return None

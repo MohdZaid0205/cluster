@@ -20,7 +20,11 @@ def create_comment(comment_in: CommentCreate, session: Session = Depends(get_ses
     if not comment_in.pid and not comment_in.parent_mid:
         raise HTTPException(status_code=400, detail="Comment must belong to a post or another comment")
 
-    core_comment, content, stats = CommentService.create_comment(session, comment_in)
+    comment_payload = comment_in.model_copy(update={"uid": current_user.uid})
+    try:
+        core_comment, content, stats = CommentService.create_comment(session, comment_payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {
         "mid"       : core_comment.mid,
