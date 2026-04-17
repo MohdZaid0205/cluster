@@ -209,6 +209,48 @@ class PostService:
             raise e
 
     @staticmethod
+    def share_post_to_cluster(session: Session, origin_pid: UUID, target_cid: UUID, uid: UUID):
+        """
+        Creates a 'Window' post: a new post in target_cid that points back to origin_pid.
+        """
+        try:
+            # 1. Get origin details to copy content/tags if needed (though Window usually just points)
+            origin_content = session.get(PostContent, origin_pid)
+            
+            # 2. Create the new PostCore (type=WINDOW)
+            core_post = PostCore(
+                uid=uid,
+                cid=target_cid,
+                type="WINDOW"
+            )
+            session.add(core_post)
+            session.flush()
+
+            # 3. Create the PostContent (mirroring origin or could be blank)
+            content = PostContent(
+                pid=core_post.pid,
+                content=origin_content.content if origin_content else "",
+                tags=origin_content.tags if origin_content else None
+            )
+            session.add(content)
+
+            # 4. Create the Window record linking them
+            window = Window(
+                pid=core_post.pid,
+                origin_pid=origin_pid,
+                shared_by_uid=uid,
+                created_at=datetime.now()
+            )
+            session.add(window)
+            
+            session.commit()
+            stats = session.get(PostStats, core_post.pid)
+            return core_post, content, stats
+        except Exception as e:
+            session.rollback()
+            raise e
+
+    @staticmethod
     def delete_post(session: Session, pid: UUID):
         """
         Deletes a post completely from the system.

@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from api.database import get_session
-from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember, ClusterBookmark
+from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember, ClusterBookmark, ClusterModerator
 from api.schemas.cluster import ClusterCreate, ClusterResponse, ClusterDetailResponse, ClusterMemberCreate
 from api.services.cluster_service import ClusterService
 from api.models.user import UserAuth
@@ -18,6 +18,9 @@ router = APIRouter(prefix="/clusters", tags=["Clusters"])
 
 class ChatOptionPayload(BaseModel):
     chat_enabled: bool
+
+class AddModeratorPayload(BaseModel):
+    uid: UUID  # uid of the user to promote to moderator
 
 
 # ---- Static-path endpoints (must be before /{cid} routes) -----------------
@@ -231,3 +234,39 @@ def get_cluster_recommendations(limit: int = 5, session: Session = Depends(get_s
     Suggests new clusters for a user based on the categories of clusters they already joined.
     """
     return ClusterService.get_cluster_recommendations_for_user(session, current_user.uid, limit)
+
+@router.get("/{cid}/membership/me", response_model=Any)
+def check_my_membership(cid: UUID, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
+    """
+    Returns whether the current user is a member of the cluster and their role.
+    """
+    member = ClusterService.check_user_membership(session, cid, current_user.uid)
+    is_mod = ClusterService.is_cluster_moderator(session, cid, current_user.uid)
+    info = session.exec(select(ClusterInfo).where(ClusterInfo.cid == cid)).first()
+    is_creator = info is not None and str(info.creator_uid) == str(current_user.uid)
+    return {
+        "is_member": member is not None,
+        "role": member.role if member else None,
+        "is_moderator": is_mod,
+        "is_creator": is_creator,
+    }
+
+@router.post("/{cid}/moderators", response_model=Any)
+def add_moderator(cid: UUID, payload: AddModeratorPayload, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
+    """
+    Promotes a user to moderator within a cluster. Only the cluster creator may call this.
+    """
+    # Only creator can add moderators
+    info = session.exec(select(ClusterInfo).where(ClusterInfo.cid == cid)).first()
+    if not info:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    if str(info.creator_uid) != str(current_user.uid):
+        raise HTTPException(status_code=403, detail="Only the cluster creator can add moderators")
+
+    # Target user must be a member
+    member = ClusterService.check_user_membership(session, cid, payload.uid)
+    if not member:
+        raise HTTPException(status_code=400, detail="User must be a cluster member before being promoted to moderator")
+
+    result = ClusterService.add_cluster_moderator(session, cid, payload.uid)
+    return {"message": "Moderator added successfully", "cid": str(cid), "uid": str(payload.uid), "assigned_at": str(result.assigned_at)}

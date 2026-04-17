@@ -82,7 +82,7 @@ def test_cluster_fixture(session: Session, test_user):
     info = ClusterInfo(cid=cid, description="A global test cluster", creator_uid=test_user.uid)
     # Start at 0 — trg_increment_member_count will bump to 1 when member row inserted
     stats = ClusterStats(cid=cid, member_count=0)
-    member = ClusterMember(cid=cid, uid=test_user.uid, role="CREATOR")
+    member = ClusterMember(cid=cid, uid=test_user.uid, role="MODERATOR")
     
     session.add(core)
     session.add(info)

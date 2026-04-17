@@ -7,6 +7,8 @@ from api.database import get_session
 from api.models.comment import CommentCore, CommentContent, CommentStats, CommentReaction
 from api.schemas.comment import CommentCreate, CommentResponse, CommentReactionCreate
 from api.services.comment_service import CommentService
+from api.services.cluster_service import ClusterService
+from api.models.post import PostCore
 from api.models.user import UserAuth
 from api.auth import get_current_user
 
@@ -64,8 +66,22 @@ def get_comments_for_post(pid: UUID, session: Session = Depends(get_session)):
 @router.delete("/{mid}")
 def delete_comment(mid: UUID, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
     """
-    Wipes a comment entity and cascade sweeps its descendants.
+    Deletes a comment. Only the comment author or a cluster moderator may delete it.
     """
+    comment = session.get(CommentCore, mid)
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    is_owner = str(comment.uid) == str(current_user.uid)
+    # Determine cluster from the post this comment belongs to
+    post = session.get(PostCore, comment.pid) if comment.pid else None
+    is_mod = ClusterService.is_cluster_moderator(session, post.cid, current_user.uid) if post else False
+    if not is_owner and not is_mod:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be the comment author or a cluster moderator to delete this comment."
+        )
+
     success = CommentService.delete_comment(session, mid)
     if not success:
         raise HTTPException(status_code=404, detail="Comment not found")
@@ -75,9 +91,16 @@ def delete_comment(mid: UUID, session: Session = Depends(get_session), current_u
 def react_to_comment(mid: UUID, reaction_in: CommentReactionCreate, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
     """
     Appends or updates a user rating action on a specific comment.
+    Returns updated {likes, dislikes} counts.
     """
     CommentService.add_reaction_to_comment(session, mid, current_user.uid, reaction_in.reaction_type)
-    return {"message": "Reaction recorded successfully"}
+    # Refresh stats and return updated counts
+    from api.models.comment import CommentStats
+    stats = session.get(CommentStats, mid)
+    return {
+        "likes": stats.likes if stats else 0,
+        "dislikes": stats.dislikes if stats else 0,
+    }
 
 @router.get("/post/{pid}/root", response_model=List[Any])
 def get_root_comments_for_post(pid: UUID, session: Session = Depends(get_session)):

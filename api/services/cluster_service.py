@@ -114,16 +114,20 @@ class ClusterService:
     @staticmethod
     def list_cluster_members(session: Session, cid: UUID, limit: int = 50):
         """
-        Lists baseline membership representations.
+        Lists membership representations including uid, name, role.
         Maps to: LIST ALL MEMBERS
         """
         statement = (
-            select(UserProfile.name, ClusterMember.joined_at, ClusterMember.role)
+            select(UserProfile.uid, UserProfile.name, ClusterMember.joined_at, ClusterMember.role)
             .join(ClusterMember, UserProfile.uid == ClusterMember.uid)
             .where(ClusterMember.cid == cid)
             .limit(limit)
         )
-        return session.exec(statement).all()
+        rows = session.exec(statement).all()
+        return [
+            {"uid": str(r[0]), "name": r[1], "joined_at": str(r[2]), "role": r[3]}
+            for r in rows
+        ]
 
     @staticmethod
     def get_top_clusters_by_members(session: Session, limit: int = 5):
@@ -235,8 +239,13 @@ class ClusterService:
                 role = "MODERATOR"
             )
             session.add(member)
+
+            # Explicitly register the creator as a moderator so is_cluster_moderator() always finds them
+            moderator = ClusterModerator(cid=core_cluster.cid, uid=cluster_in.creator_uid)
+            session.add(moderator)
+
             session.commit()
-            session.expire_all()      # clear cache so trigger-updated member_count is visible
+            session.expire_all()
             session.refresh(core_cluster)
             session.refresh(info)
             stats = session.get(ClusterStats, core_cluster.cid)
@@ -385,3 +394,47 @@ class ClusterService:
         session.commit()
         session.refresh(bookmark)
         return bookmark
+
+    @staticmethod
+    def is_cluster_moderator(session: Session, cid: UUID, uid: UUID) -> bool:
+        """
+        Returns True if uid is an explicit moderator OR the creator of cid.
+        """
+        # Check explicit moderator table
+        mod = session.exec(
+            select(ClusterModerator).where(ClusterModerator.cid == cid, ClusterModerator.uid == uid)
+        ).first()
+        if mod:
+            return True
+        # Also check if user is the cluster creator
+        info = session.exec(
+            select(ClusterInfo).where(ClusterInfo.cid == cid)
+        ).first()
+        return info is not None and info.creator_uid == uid
+
+    @staticmethod
+    def add_cluster_moderator(session: Session, cid: UUID, new_mod_uid: UUID):
+        """
+        Assigns moderator role to a user in a cluster. Idempotent.
+        Also promotes their ClusterMember role to MODERATOR if they are a member.
+        """
+        existing = session.exec(
+            select(ClusterModerator).where(ClusterModerator.cid == cid, ClusterModerator.uid == new_mod_uid)
+        ).first()
+        if existing:
+            return existing
+
+        moderator = ClusterModerator(cid=cid, uid=new_mod_uid)
+        session.add(moderator)
+
+        # Update the ClusterMember role if they are already a member
+        member = session.exec(
+            select(ClusterMember).where(ClusterMember.cid == cid, ClusterMember.uid == new_mod_uid)
+        ).first()
+        if member:
+            member.role = "MODERATOR"
+            session.add(member)
+
+        session.commit()
+        session.refresh(moderator)
+        return moderator
