@@ -19,7 +19,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     """
     Schema for validating partial updates to an existing user's profile.
-    """
+    """ 
     name         : Optional[str] = None                                        # Updated display name
     bio          : Optional[str] = None                                        # Updated biography text
     location     : Optional[str] = None                                        # Updated geographical location
