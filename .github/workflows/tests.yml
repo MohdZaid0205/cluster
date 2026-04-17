@@ -23,6 +23,10 @@ jobs:
         pip install pytest pytest-asyncio faker
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         
-    - name: Run tests
+    - name: Run Service & Unit Tests
       run: |
-        python -m pytest tests/
+        python -m pytest tests/test_services/ tests/test_triggers.py
+
+    - name: Run API Tests
+      run: |
+        python -m pytest tests/test_api/

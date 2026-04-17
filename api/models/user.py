@@ -1,6 +1,6 @@
 from typing import Optional
 from uuid import uuid4, UUID
-from datetime import datetime, UTC
+from datetime import datetime
 from sqlmodel import Field, SQLModel
 from api.models.enums import UserRole
 
@@ -28,5 +28,5 @@ class UserProfile(SQLModel, table=True):
     bio          : Optional[str]  = None                                                # Short biography or status message
     location     : Optional[str]  = None                                                # Geographical location of the user
     profile_image: Optional[str]  = None                                                # URL to the user's profile image
-    created_at   : datetime       = Field(default_factory=lambda: datetime.now(UTC), index=True)      # Timestamp of profile creation
-    last_active  : datetime       = Field(default_factory=lambda: datetime.now(UTC), index=True)      # Timestamp of last activity
+    created_at   : datetime       = Field(default_factory=lambda: datetime.now(), index=True)      # Timestamp of profile creation
+    last_active  : datetime       = Field(default_factory=lambda: datetime.now(), index=True)      # Timestamp of last activity

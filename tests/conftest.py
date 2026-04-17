@@ -48,6 +48,12 @@ def client_fixture(session: Session):
 def test_password_fixture():
     return "secure_password_123"
 
+@pytest.fixture(name="auth_headers")
+def auth_headers_fixture(test_user):
+    from api.auth import create_access_token
+    token = create_access_token(data={"sub": str(test_user.uid)})
+    return {"Authorization": f"Bearer {token}"}
+
 @pytest.fixture(name="test_user")
 def test_user_fixture(session: Session, test_password):
     """Creates a standard verified user for testing."""

@@ -208,41 +208,45 @@ class ClusterService:
         ClusterStats.member_count is incremented from 0 by trg_increment_member_count
         when the first ClusterMember row is inserted.
         """
-        core_cluster = ClusterCore(
-            name         = cluster_in.name,
-            category     = cluster_in.category,
-            is_private   = cluster_in.is_private,
-            profile_icon = cluster_in.profile_icon
-        )
-        session.add(core_cluster)
-        session.flush()
+        try:
+            core_cluster = ClusterCore(
+                name         = cluster_in.name,
+                category     = cluster_in.category,
+                is_private   = cluster_in.is_private,
+                profile_icon = cluster_in.profile_icon
+            )
+            session.add(core_cluster)
+            session.flush()
 
-        info = ClusterInfo(
-            cid         = core_cluster.cid,
-            description = cluster_in.description,
-            creator_uid = cluster_in.creator_uid,
-            tags        = cluster_in.tags
-        )
-        session.add(info)
+            info = ClusterInfo(
+                cid         = core_cluster.cid,
+                description = cluster_in.description,
+                creator_uid = cluster_in.creator_uid,
+                tags        = cluster_in.tags
+            )
+            session.add(info)
 
-        # Start at 0 — trigger will increment to 1 when member row is inserted
-        stats = ClusterStats(cid=core_cluster.cid, member_count=0)
-        session.add(stats)
-        session.flush()           # persist stats row BEFORE member insert triggers the increment
+            # Start at 0 — trigger will increment to 1 when member row is inserted
+            stats = ClusterStats(cid=core_cluster.cid, member_count=0)
+            session.add(stats)
+            session.flush()           # persist stats row BEFORE member insert triggers the increment
 
-        member = ClusterMember(
-            cid  = core_cluster.cid,
-            uid  = cluster_in.creator_uid,
-            role = "MODERATOR"
-        )
-        session.add(member)
-        session.commit()
-        session.expire_all()      # clear cache so trigger-updated member_count is visible
-        session.refresh(core_cluster)
-        session.refresh(info)
-        stats = session.get(ClusterStats, core_cluster.cid)
+            member = ClusterMember(
+                cid  = core_cluster.cid,
+                uid  = cluster_in.creator_uid,
+                role = "MODERATOR"
+            )
+            session.add(member)
+            session.commit()
+            session.expire_all()      # clear cache so trigger-updated member_count is visible
+            session.refresh(core_cluster)
+            session.refresh(info)
+            stats = session.get(ClusterStats, core_cluster.cid)
 
-        return core_cluster, info, stats
+            return core_cluster, info, stats
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     def delete_cluster(session: Session, cid: UUID):

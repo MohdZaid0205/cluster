@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
@@ -10,7 +10,7 @@ class UserCreate(BaseModel):
     """
     name    : str                                                              # Full display name of the user
     password: str                                                              # Plain text password (to be securely hashed)
-    email   : Optional[str]      = None                                        # Optional email for contact and login
+    email   : Optional[EmailStr] = None                                        # Optional email for contact and login
     phone   : Optional[str]      = None                                        # Optional phone number for contact and login
     role    : Optional[UserRole] = UserRole.MEMBER                             # User role assignment, defaults to MEMBER
     bio     : Optional[str]      = None                                        # Initial biography text for the profile
@@ -19,7 +19,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     """
     Schema for validating partial updates to an existing user's profile.
-    """
+    """ 
     name         : Optional[str] = None                                        # Updated display name
     bio          : Optional[str] = None                                        # Updated biography text
     location     : Optional[str] = None                                        # Updated geographical location

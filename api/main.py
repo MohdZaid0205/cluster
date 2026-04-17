@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 from sqlmodel import SQLModel
-
 from api.routers import users, clusters, posts, comments, triggers
 from api.database import engine
 from api.triggers import apply_triggers_now
@@ -13,12 +12,10 @@ import api.models  # noqa: F401
 
 app = FastAPI(title="Cluster API", version="1.0.0", description="Backend API for the Cluster application.")
 
-# ---------------------------------------------------------------------------
-# CORS – allow the Vite dev server (port 5173/8080) to talk to FastAPI (8000)
-# ---------------------------------------------------------------------------
+# CORS – allow any client to connect for multi-user capabilities
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],           # tighten in production
+    allow_origins=["*"], # changed from localhost specifically to asterisk to allow everyone on your IP address to connect
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,3 +52,8 @@ if os.path.isdir(WEB_DIR):
 @app.get("/")
 def root():
     return {"message": "Welcome to the Cluster API", "status": "ok", "ui_url": "/web"}
+
+if __name__ == "__main__":
+    import uvicorn
+    # Running on 0.0.0.0 allows connections from other users/devices on the same network
+    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)

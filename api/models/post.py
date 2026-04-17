@@ -1,6 +1,6 @@
 from typing import Optional
 from uuid import uuid4, UUID
-from datetime import datetime, UTC
+from datetime import datetime
 from sqlmodel import Field, SQLModel
 from api.models.enums import PostType, ReactionType, MegaphoneType
 
@@ -14,7 +14,7 @@ class PostCore(SQLModel, table=True):
     uid       : UUID             = Field(index=True, foreign_key="userauth.uid")          # ID of the user who authored the post
     cid       : UUID             = Field(index=True, foreign_key="clustercore.cid")       # ID of the cluster where the post lives
     type      : PostType         = Field(default=PostType.TEXT)                           # The type or format of the post
-    created_at: datetime         = Field(default_factory=lambda: datetime.now(UTC), index=True)     # Timestamp when the post was created
+    created_at: datetime         = Field(default_factory=lambda: datetime.now(), index=True)     # Timestamp when the post was created
     updated_at: Optional[datetime] = None                                                 # Timestamp of the last edit
 
 class PostContent(SQLModel, table=True):
@@ -46,7 +46,7 @@ class PostReaction(SQLModel, table=True):
     pid          : UUID          = Field(primary_key=True, foreign_key="postcore.pid")    # Foreign key linked to PostCore
     uid          : UUID          = Field(primary_key=True, foreign_key="userauth.uid")    # ID of the user reacting
     reaction_type: ReactionType  = Field(index=True)                                      # The specific type of reaction recorded
-    timestamp    : datetime      = Field(default_factory=lambda: datetime.now(UTC))                 # Timestamp of the reaction
+    timestamp    : datetime      = Field(default_factory=lambda: datetime.now())                 # Timestamp of the reaction
 
 class Window(SQLModel, table=True):
     """
@@ -58,7 +58,7 @@ class Window(SQLModel, table=True):
     origin_pid     : UUID        = Field(foreign_key="postcore.pid")                      # ID of the original post being shared
     shared_by_uid  : UUID        = Field(foreign_key="userauth.uid")                      # User who shared the post
     shared_into_cid: UUID        = Field(foreign_key="clustercore.cid")                   # Cluster where the post was shared
-    created_at     : datetime    = Field(default_factory=lambda: datetime.now(UTC))                 # Timestamp of the sharing action
+    created_at     : datetime    = Field(default_factory=lambda: datetime.now())                 # Timestamp of the sharing action
 
 class Megaphone(SQLModel, table=True):
     """

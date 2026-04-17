@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
-from typing import List
+from typing import List, Any
 from uuid import UUID
 
 from api.database import get_session
@@ -12,6 +12,7 @@ from api.security import (
     create_access_token,
     get_current_uid,
 )
+from api.auth import create_access_token, get_current_user
 
 router = APIRouter(prefix="/users", tags=["Users"])
 

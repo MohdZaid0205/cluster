@@ -1,6 +1,6 @@
 from sqlmodel import Session, select, func, desc, or_
 from typing import List, Optional
-from datetime import datetime, UTC
+from datetime import datetime
 from uuid import UUID
 
 from api.models.post import PostCore, PostContent, PostStats, PostReaction, Window, Megaphone
@@ -129,7 +129,7 @@ class PostService:
             .join(PostCore, Megaphone.pid == PostCore.pid)
             .join(PostContent, Megaphone.pid == PostContent.pid)
             .where(Megaphone.is_active == True)
-            .where(Megaphone.end_time > datetime.now(UTC))
+            .where(Megaphone.end_time > datetime.now())
         )
         return session.exec(statement).all()
 
@@ -184,28 +184,32 @@ class PostService:
         Initializes a post including its content payload.
         PostStats is auto-created by the trg_init_post_stats trigger.
         """
-        core_post = PostCore(
-            uid  = post_in.uid,
-            cid  = post_in.cid,
-            type = post_in.type
-        )
-        session.add(core_post)
-        session.flush()  # generate pid before FK inserts
+        try:
+            core_post = PostCore(
+                uid  = post_in.uid,
+                cid  = post_in.cid,
+                type = post_in.type
+            )
+            session.add(core_post)
+            session.flush()  # generate pid before FK inserts
 
-        content = PostContent(
-            pid     = core_post.pid,
-            content = post_in.content,
-            tags    = post_in.tags
-        )
-        session.add(content)
-        session.commit()          # trigger fires here, creating PostStats
-        session.expire_all()      # clear cache so we see trigger-created rows
+            content = PostContent(
+                pid     = core_post.pid,
+                content = post_in.content,
+                tags    = post_in.tags
+            )
+            session.add(content)
+            session.commit()          # trigger fires here, creating PostStats
+            session.expire_all()      # clear cache so we see trigger-created rows
 
-        session.refresh(core_post)
-        session.refresh(content)
-        stats = session.get(PostStats, core_post.pid)
+            session.refresh(core_post)
+            session.refresh(content)
+            stats = session.get(PostStats, core_post.pid)
 
-        return core_post, content, stats
+            return core_post, content, stats
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     def delete_post(session: Session, pid: UUID):
@@ -223,40 +227,48 @@ class PostService:
         """
         Registers a reaction and updates the aggregated statistics payload.
         """
-        # Ensure only 1 reaction per user per post exists by clearing previous
-        existing_Reaction = session.exec(select(PostReaction).where(PostReaction.pid == pid, PostReaction.uid == uid)).first()
-        stats = session.get(PostStats, pid)
-        
-        if existing_Reaction:
-            if existing_Reaction.reaction_type == reaction_type:
-                return existing_Reaction # No change
-            # Decrease old stat counter
-            if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
-            elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
-            session.delete(existing_Reaction)
-        
-        reaction = PostReaction(pid=pid, uid=uid, reaction_type=reaction_type)
-        session.add(reaction)
-        
-        if reaction_type.name == "LIKE" and stats: stats.likes += 1
-        elif reaction_type.name == "DISLIKE" and stats: stats.dislikes += 1
-        
-        if stats: session.add(stats)
-        session.commit()
-        return reaction
+        try:
+            # Ensure only 1 reaction per user per post exists by clearing previous
+            existing_Reaction = session.exec(select(PostReaction).where(PostReaction.pid == pid, PostReaction.uid == uid)).first()
+            stats = session.get(PostStats, pid)
+            
+            if existing_Reaction:
+                if existing_Reaction.reaction_type == reaction_type:
+                    return existing_Reaction # No change
+                # Decrease old stat counter
+                if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
+                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
+                session.delete(existing_Reaction)
+            
+            reaction = PostReaction(pid=pid, uid=uid, reaction_type=reaction_type)
+            session.add(reaction)
+            
+            if reaction_type.name == "LIKE" and stats: stats.likes += 1
+            elif reaction_type.name == "DISLIKE" and stats: stats.dislikes += 1
+            
+            if stats: session.add(stats)
+            session.commit()
+            return reaction
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     def remove_reaction_from_post(session: Session, pid: UUID, uid: UUID):
         """
         Unregisters a user's reaction from a post and decrements stats.
         """
-        existing_Reaction = session.exec(select(PostReaction).where(PostReaction.pid == pid, PostReaction.uid == uid)).first()
-        if existing_Reaction:
-            stats = session.get(PostStats, pid)
-            if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
-            elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
-            if stats: session.add(stats)
-            session.delete(existing_Reaction)
-            session.commit()
-            return True
-        return False
+        try:
+            existing_Reaction = session.exec(select(PostReaction).where(PostReaction.pid == pid, PostReaction.uid == uid)).first()
+            if existing_Reaction:
+                stats = session.get(PostStats, pid)
+                if existing_Reaction.reaction_type.name == "LIKE" and stats: stats.likes -= 1
+                elif existing_Reaction.reaction_type.name == "DISLIKE" and stats: stats.dislikes -= 1
+                if stats: session.add(stats)
+                session.delete(existing_Reaction)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            raise e

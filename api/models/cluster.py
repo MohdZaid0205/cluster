@@ -1,6 +1,6 @@
 from typing import Optional
 from uuid import uuid4, UUID
-from datetime import datetime, UTC
+from datetime import datetime
 from sqlmodel import Field, SQLModel
 from api.models.enums import ClusterRole, RuleAction
 
@@ -25,7 +25,7 @@ class ClusterInfo(SQLModel, table=True):
     cid         : UUID           = Field(primary_key=True, foreign_key="clustercore.cid") # Foreign key linked to ClusterCore
     description : Optional[str]  = None                                                   # Detailed description of the cluster
     creator_uid : UUID           = Field(foreign_key="userauth.uid", index=True)          # User ID of the cluster's creator
-    created_at  : datetime       = Field(default_factory=lambda: datetime.now(UTC))                 # Timestamp of cluster creation
+    created_at  : datetime       = Field(default_factory=lambda: datetime.now())                 # Timestamp of cluster creation
     tags        : Optional[str]  = None                                                   # Comma-separated tags for search
 
 class ClusterStats(SQLModel, table=True):
@@ -45,7 +45,7 @@ class ClusterMember(SQLModel, table=True):
 
     cid         : UUID           = Field(primary_key=True, foreign_key="clustercore.cid") # Foreign key linked to ClusterCore
     uid         : UUID           = Field(primary_key=True, foreign_key="userauth.uid")    # User ID of the member
-    joined_at   : datetime       = Field(default_factory=lambda: datetime.now(UTC))                 # Timestamp when user joined
+    joined_at   : datetime       = Field(default_factory=lambda: datetime.now())                 # Timestamp when user joined
     role        : ClusterRole    = Field(default=ClusterRole.MEMBER)                      # Predefined role within the cluster
 
 class ClusterBookmark(SQLModel, table=True):
@@ -77,7 +77,7 @@ class ClusterModerator(SQLModel, table=True):
 
     cid         : UUID           = Field(primary_key=True, foreign_key="clustercore.cid") # Foreign key linked to ClusterCore
     uid         : UUID           = Field(primary_key=True, foreign_key="userauth.uid")    # User ID of the moderator
-    assigned_at : datetime       = Field(default_factory=lambda: datetime.now(UTC))                 # Timestamp when moderation was assigned
+    assigned_at : datetime       = Field(default_factory=lambda: datetime.now())                 # Timestamp when moderation was assigned
 
 class ClusterRule(SQLModel, table=True):
     """

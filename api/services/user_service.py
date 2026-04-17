@@ -188,9 +188,10 @@ class UserService:
         Uses a transaction to ensure both UserAuth and UserProfile are created
         atomically — rollback if either fails.
         """
+        # Hash the incoming plain text password before persistence
+        hashed_password = get_password_hash(user_in.password)
+        
         try:
-            hashed_password = get_password_hash(user_in.password)
-            
             auth_user = UserAuth(
                 email         = user_in.email,
                 phone         = user_in.phone,
@@ -212,9 +213,9 @@ class UserService:
             session.refresh(profile)
 
             return auth_user, profile
-        except Exception:
+        except Exception as e:
             session.rollback()
-            raise
+            raise e
 
     @staticmethod
     def update_user_profile(session: Session, uid: UUID, update_data: dict):
