@@ -87,9 +87,17 @@ def register_triggers(engine: Engine) -> None:
 
     @event.listens_for(engine, "connect")
     def _apply_triggers(dbapi_conn, connection_record):
+        import sqlite3
         cursor = dbapi_conn.cursor()
         for ddl in _ALL_TRIGGERS:
-            cursor.execute(ddl)
+            try:
+                cursor.execute(ddl)
+            except sqlite3.OperationalError as e:
+                # Ignore if table doesn't exist yet; triggers will be created when the table exists
+                if "no such table" in str(e):
+                    pass
+                else:
+                    raise
         cursor.close()
 
 

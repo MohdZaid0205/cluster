@@ -9,7 +9,21 @@ from api.database import engine
 # from api.models.user import UserAuth
 # from sqlmodel import SQLModel
 
-app = FastAPI(title="Cluster API", version="1.0.0", description="Backend API for the Cluster application.")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Note: We do not call SQLModel.metadata.create_all(engine) because the database
+    # already exists and is populated via `archive/research/populate.py`.
+    # We are just connecting to existing `temp/db/research.db`!
+    # However, we DO create any NEW tables (e.g. ClusterBookmark) that were added
+    # after the initial population script.
+    from api.models.cluster import ClusterBookmark
+    from api.database import engine
+    ClusterBookmark.__table__.create(engine, checkfirst=True)
+    yield
+
+app = FastAPI(title="Cluster API", version="1.0.0", description="Backend API for the Cluster application.", lifespan=lifespan)
 
 # CORS – allow any client to connect for multi-user capabilities
 app.add_middleware(
@@ -20,14 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Note: We do not call SQLModel.metadata.create_all(engine) because the database
-# already exists and is populated via `archive/research/populate.py`. 
-# We are just connecting to existing `temp/db/research.db`!
-# However, we DO create any NEW tables (e.g. ClusterBookmark) that were added
-# after the initial population script.
 
-from api.models.cluster import ClusterBookmark
-ClusterBookmark.__table__.create(engine, checkfirst=True)
 
 app.include_router(users.router)
 app.include_router(clusters.router)

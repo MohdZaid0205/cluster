@@ -47,7 +47,7 @@ def test_react_to_post(client: TestClient, test_post, test_user, session: Sessio
     
     response = client.post(f"/posts/{test_post.pid}/react", json=reaction_data, headers=auth_headers)
     assert response.status_code == 200
-    assert response.json()["message"] == "Reaction recorded successfully"
+    assert response.json()["current_reaction"] == "LIKE"
     
     # Verify in DB
     stats = session.get(PostStats, test_post.pid)
