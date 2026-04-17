@@ -1,15 +1,29 @@
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session, select
 from typing import List
 from uuid import UUID
 
 from api.database import get_session
-from api.models.cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember
+from api.models.cluster import (
+    ClusterCore,
+    ClusterInfo,
+    ClusterStats,
+    ClusterMember,
+    ClusterBookmark,
+    ClusterChatOption,
+)
 from api.schemas.cluster import ClusterCreate, ClusterResponse, ClusterDetailResponse, ClusterMemberCreate
 from api.services.cluster_service import ClusterService
 from api.security import get_current_uid
 
 router = APIRouter(prefix="/clusters", tags=["Clusters"])
+
+
+class ClusterChatOptionUpdate(BaseModel):
+    chat_enabled: bool
 
 @router.post("/", response_model=ClusterDetailResponse)
 def create_cluster(cluster_in: ClusterCreate, session: Session = Depends(get_session)):
@@ -30,6 +44,170 @@ def create_cluster(cluster_in: ClusterCreate, session: Session = Depends(get_ses
         "created_at"  : info.created_at,
         "member_count": stats.member_count
     }
+
+
+@router.get("/memberships/me")
+def get_my_cluster_memberships(
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Returns all cluster IDs the authenticated user has joined.
+    """
+    statement = select(ClusterMember.cid).where(ClusterMember.uid == uid)
+    cids = session.exec(statement).all()
+    return {"cluster_ids": [str(cid) for cid in cids]}
+
+
+@router.post("/{cid}/bookmark")
+def bookmark_cluster(
+    cid: UUID,
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Bookmarks a cluster for the authenticated user.
+    Idempotent — returns success even if already bookmarked.
+    """
+    cluster = session.get(ClusterCore, cid)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    existing = session.exec(
+        select(ClusterBookmark).where(ClusterBookmark.cid == cid, ClusterBookmark.uid == uid)
+    ).first()
+    if existing:
+        return {"message": "Already bookmarked", "already_bookmarked": True}
+
+    bookmark = ClusterBookmark(cid=cid, uid=uid)
+    session.add(bookmark)
+    session.commit()
+    return {"message": "Cluster bookmarked", "already_bookmarked": False}
+
+
+@router.delete("/{cid}/bookmark")
+def unbookmark_cluster(
+    cid: UUID,
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Removes a bookmark for the authenticated user.
+    Idempotent — returns success if no bookmark exists.
+    """
+    bookmark = session.exec(
+        select(ClusterBookmark).where(ClusterBookmark.cid == cid, ClusterBookmark.uid == uid)
+    ).first()
+    if not bookmark:
+        return {"message": "Bookmark not found", "already_removed": True}
+
+    session.delete(bookmark)
+    session.commit()
+    return {"message": "Cluster unbookmarked", "already_removed": False}
+
+
+@router.get("/bookmarks/me")
+def get_my_bookmarked_clusters(
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Returns bookmarked clusters with chat option and membership status.
+    """
+    bookmarks = session.exec(
+        select(ClusterBookmark)
+        .where(ClusterBookmark.uid == uid)
+        .order_by(ClusterBookmark.bookmarked_at.desc())
+    ).all()
+
+    response = []
+    for bookmark in bookmarks:
+        cluster = session.get(ClusterCore, bookmark.cid)
+        if not cluster:
+            continue
+
+        chat_option = session.exec(
+            select(ClusterChatOption).where(ClusterChatOption.cid == bookmark.cid, ClusterChatOption.uid == uid)
+        ).first()
+        membership = session.exec(
+            select(ClusterMember).where(ClusterMember.cid == bookmark.cid, ClusterMember.uid == uid)
+        ).first()
+
+        response.append(
+            {
+                "cid": str(cluster.cid),
+                "name": cluster.name,
+                "category": cluster.category,
+                "bookmarked_at": bookmark.bookmarked_at,
+                "chat_enabled": chat_option.chat_enabled if chat_option else True,
+                "is_member": membership is not None,
+            }
+        )
+
+    return response
+
+
+@router.put("/{cid}/chat-options")
+def update_cluster_chat_options(
+    cid: UUID,
+    payload: ClusterChatOptionUpdate,
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Updates authenticated user's chat option for a cluster.
+    """
+    cluster = session.get(ClusterCore, cid)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    option = session.exec(
+        select(ClusterChatOption).where(ClusterChatOption.cid == cid, ClusterChatOption.uid == uid)
+    ).first()
+
+    if not option:
+        option = ClusterChatOption(
+            cid=cid,
+            uid=uid,
+            chat_enabled=payload.chat_enabled,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(option)
+    else:
+        option.chat_enabled = payload.chat_enabled
+        option.updated_at = datetime.now(UTC)
+
+    session.commit()
+
+    return {
+        "cid": str(cid),
+        "chat_enabled": option.chat_enabled,
+        "updated_at": option.updated_at,
+    }
+
+
+@router.get("/chat-options/me")
+def get_my_chat_options(
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Returns chat options configured by the authenticated user.
+    """
+    options = session.exec(select(ClusterChatOption).where(ClusterChatOption.uid == uid)).all()
+    response = []
+    for option in options:
+        cluster = session.get(ClusterCore, option.cid)
+        response.append(
+            {
+                "cid": str(option.cid),
+                "name": cluster.name if cluster else None,
+                "category": cluster.category if cluster else None,
+                "chat_enabled": option.chat_enabled,
+                "updated_at": option.updated_at,
+            }
+        )
+    return response
 
 @router.get("/{cid}", response_model=ClusterDetailResponse)
 def get_cluster(cid: UUID, session: Session = Depends(get_session)):

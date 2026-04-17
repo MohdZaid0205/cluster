@@ -48,6 +48,27 @@ class ClusterMember(SQLModel, table=True):
     joined_at   : datetime       = Field(default_factory=lambda: datetime.now(UTC))                 # Timestamp when user joined
     role        : ClusterRole    = Field(default=ClusterRole.MEMBER)                      # Predefined role within the cluster
 
+class ClusterBookmark(SQLModel, table=True):
+    """
+    Stores per-user bookmarked clusters for quick access in the UI.
+    """
+    __table_args__ = {"extend_existing": True}
+
+    cid         : UUID           = Field(primary_key=True, foreign_key="clustercore.cid") # Cluster being bookmarked
+    uid         : UUID           = Field(primary_key=True, foreign_key="userauth.uid")    # Bookmark owner
+    bookmarked_at: datetime      = Field(default_factory=lambda: datetime.now(UTC))         # Timestamp when bookmark was created
+
+class ClusterChatOption(SQLModel, table=True):
+    """
+    Stores per-user chat preference for each cluster.
+    """
+    __table_args__ = {"extend_existing": True}
+
+    cid         : UUID           = Field(primary_key=True, foreign_key="clustercore.cid") # Cluster being configured
+    uid         : UUID           = Field(primary_key=True, foreign_key="userauth.uid")    # Owner of the preference
+    chat_enabled: bool           = Field(default=True)                                       # Whether cluster chat is enabled for this user
+    updated_at  : datetime       = Field(default_factory=lambda: datetime.now(UTC))         # Last update timestamp
+
 class ClusterModerator(SQLModel, table=True):
     """
     Tracks users who have been explicitly assigned moderator capabilities.

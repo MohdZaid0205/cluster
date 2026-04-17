@@ -9,7 +9,7 @@
 
 from .enums import UserRole, ClusterRole, PostType, ReactionType, MegaphoneType, RuleAction
 from .user import UserAuth, UserProfile
-from .cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember, ClusterModerator, ClusterRule
+from .cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember, ClusterBookmark, ClusterChatOption, ClusterModerator, ClusterRule
 from .post import PostCore, PostContent, PostStats, PostReaction, Window, Megaphone
 from .comment import CommentCore, CommentContent, CommentStats, CommentReaction
 
@@ -19,6 +19,8 @@ __all__ = [
     "ClusterInfo",
     "ClusterStats",
     "ClusterMember",
+    "ClusterBookmark",
+    "ClusterChatOption",
     "ClusterModerator",
     "ClusterRule",
     "ClusterRole",
