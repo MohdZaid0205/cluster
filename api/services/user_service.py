@@ -43,12 +43,12 @@ class UserService:
     @staticmethod
     def get_user_posts_across_clusters(session: Session, uid: UUID):
         """
-        Lists all content authored by a specific user system-wide.
-        Maps to: LIST POSTS CREATED BY A PARTICULAR USER ALL ACROSS THE CLUSTERS
+        Lists all posts authored by a user with content and stats (for profile feeds).
         """
         statement = (
-            select(PostCore.uid, PostContent.content, PostContent.tags, PostCore.created_at, PostCore.cid)
+            select(PostCore, PostContent, PostStats)
             .join(PostContent, PostCore.pid == PostContent.pid)
+            .join(PostStats, PostCore.pid == PostStats.pid)
             .where(PostCore.uid == uid)
             .order_by(desc(PostCore.created_at))
         )
@@ -76,7 +76,7 @@ class UserService:
         Maps to: LIST TOP 5 COMMENTS OF A USER BASED ON LIKES COUNT
         """
         statement = (
-            select(CommentCore.uid, CommentContent.content, CommentStats.likes)
+            select(CommentCore.mid, CommentContent.content, CommentStats.likes, CommentCore.pid)
             .join(CommentContent, CommentCore.mid == CommentContent.mid)
             .join(CommentStats, CommentCore.mid == CommentStats.mid)
             .where(CommentCore.uid == uid)
@@ -92,7 +92,7 @@ class UserService:
         Maps to: LIST TOP 5 POSTS OF A USER BASED ON LIKES COUNT
         """
         statement = (
-            select(PostCore.uid, PostContent.content, PostStats.likes)
+            select(PostCore.pid, PostContent.content, PostStats.likes)
             .join(PostContent, PostCore.pid == PostContent.pid)
             .join(PostStats, PostCore.pid == PostStats.pid)
             .where(PostCore.uid == uid)
@@ -108,7 +108,7 @@ class UserService:
         Maps to: LIST TOP 5 POSTS OF A USER BASED ON DISLIKES COUNT
         """
         statement = (
-            select(PostCore.uid, PostContent.content, PostStats.dislikes)
+            select(PostCore.pid, PostContent.content, PostStats.dislikes)
             .join(PostContent, PostCore.pid == PostContent.pid)
             .join(PostStats, PostCore.pid == PostStats.pid)
             .where(PostCore.uid == uid)

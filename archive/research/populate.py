@@ -42,6 +42,11 @@ class MegaphoneType(str, Enum):
     POLL = "POLL"
     EVENT = "EVENT"
 
+class EventRsvpStatus(str, Enum):
+    GOING = "GOING"
+    MAYBE = "MAYBE"
+    NOT_GOING = "NOT_GOING"
+
 class RuleAction(str, Enum):
     BLOCK = "BLOCK"
     FLAG = "FLAG"
@@ -160,6 +165,39 @@ class Megaphone(SQLModel, table=True):
     type: MegaphoneType
     is_active: bool = True
     subscriber_count: int = 0
+
+class UserFollow(SQLModel, table=True):
+    __table_args__ = {"extend_existing": True}
+    follower_uid: UUID = Field(foreign_key="userauth.uid", primary_key=True)
+    following_uid: UUID = Field(foreign_key="userauth.uid", primary_key=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+class MegaphonePollOption(SQLModel, table=True):
+    __table_args__ = {"extend_existing": True}
+    pid: UUID = Field(foreign_key="postcore.pid", primary_key=True)
+    idx: int = Field(primary_key=True)
+    label: str
+
+class MegaphonePollVote(SQLModel, table=True):
+    __table_args__ = {"extend_existing": True}
+    pid: UUID = Field(foreign_key="postcore.pid", primary_key=True)
+    uid: UUID = Field(foreign_key="userauth.uid", primary_key=True)
+    option_idx: int
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+class MegaphoneEventMeta(SQLModel, table=True):
+    __table_args__ = {"extend_existing": True}
+    pid: UUID = Field(primary_key=True, foreign_key="postcore.pid")
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    location: Optional[str] = None
+
+class MegaphoneEventRsvp(SQLModel, table=True):
+    __table_args__ = {"extend_existing": True}
+    pid: UUID = Field(foreign_key="postcore.pid", primary_key=True)
+    uid: UUID = Field(foreign_key="userauth.uid", primary_key=True)
+    status: EventRsvpStatus
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 # 4. Comment
 class CommentCore(SQLModel, table=True):
@@ -457,7 +495,7 @@ def populate_reactions(user_ids, post_ids, comment_ids):
         
         session.commit()
 
-def populate_special_features(user_ids, cluster_ids, post_ids):
+def populate_special_features(all_user_ids, poster_ids, cluster_ids, post_ids):
     print("Generating Windows and Megaphones...")
     with Session(engine) as session:
         # Windows (Shares)
@@ -466,7 +504,7 @@ def populate_special_features(user_ids, cluster_ids, post_ids):
         # Only capable posters should share/window
         
         # Share 1000 posts
-        users_to_share = random.choices(user_ids, k=1000)
+        users_to_share = random.choices(poster_ids, k=1000)
         posts_to_share = random.choices(post_ids, k=1000)
         clusters_to_share_into = random.choices(cluster_ids, k=1000)
         
@@ -499,7 +537,7 @@ def populate_special_features(user_ids, cluster_ids, post_ids):
         # Turn random EXISTING posts into Megaphones (or create new ones, but let's upgrade existing for now or just new ones)
         # Let's create NEW megaphone posts
         for _ in range(50): # 50 active megaphones
-            uid = random.choice(user_ids)
+            uid = random.choice(poster_ids)
             cid = random.choice(cluster_ids)
             
             mega_post = PostCore(
@@ -511,15 +549,61 @@ def populate_special_features(user_ids, cluster_ids, post_ids):
             session.add(mega_post)
             session.flush()
             
+            mtype = random.choice(list(MegaphoneType))
             mega = Megaphone(
                 pid=mega_post.pid,
                 start_time=datetime.now(UTC),
                 end_time=datetime.now(UTC) + timedelta(days=7),
-                type=random.choice(list(MegaphoneType)),
+                type=mtype,
                 is_active=True,
                 subscriber_count=random.randint(0, 500)
             )
             session.add(mega)
+
+            if mtype == MegaphoneType.POLL:
+                labels = random.sample(
+                    ["Yes", "No", "Maybe", "Defer", "Abstain"],
+                    k=random.randint(2, 4),
+                )
+                for i, lab in enumerate(labels):
+                    session.add(MegaphonePollOption(pid=mega_post.pid, idx=i, label=lab))
+                max_idx = len(labels) - 1
+                seen_v = set()
+                for _ in range(random.randint(10, 80)):
+                    u = random.choice(all_user_ids)
+                    key = (mega_post.pid, u)
+                    if key in seen_v:
+                        continue
+                    seen_v.add(key)
+                    session.add(
+                        MegaphonePollVote(
+                            pid=mega_post.pid,
+                            uid=u,
+                            option_idx=random.randint(0, max_idx),
+                        )
+                    )
+            elif mtype == MegaphoneType.EVENT:
+                session.add(
+                    MegaphoneEventMeta(
+                        pid=mega_post.pid,
+                        starts_at=datetime.now(UTC) + timedelta(days=random.randint(1, 14)),
+                        ends_at=datetime.now(UTC) + timedelta(days=random.randint(15, 20)),
+                        location=fake.city() if random.random() > 0.2 else None,
+                    )
+                )
+                seen_r = set()
+                for _ in range(random.randint(5, 40)):
+                    u = random.choice(all_user_ids)
+                    if u in seen_r:
+                        continue
+                    seen_r.add(u)
+                    session.add(
+                        MegaphoneEventRsvp(
+                            pid=mega_post.pid,
+                            uid=u,
+                            status=random.choice(list(EventRsvpStatus)),
+                        )
+                    )
             
         session.commit()
 
@@ -568,7 +652,19 @@ def main():
     populate_reactions(user_ids, post_ids, comment_ids)
     
     # Windows/Megaphones should probably come from posters
-    populate_special_features(poster_ids, cluster_ids, post_ids)
+    populate_special_features(user_ids, poster_ids, cluster_ids, post_ids)
+
+    print("Generating follow relationships...")
+    with Session(engine) as session:
+        seen = set()
+        for _ in range(5000):
+            a, b = random.sample(user_ids, 2)
+            key = (a, b)
+            if key in seen:
+                continue
+            seen.add(key)
+            session.add(UserFollow(follower_uid=a, following_uid=b))
+        session.commit()
         
     print(f"Done! Created {N_USERS} Users, {N_CLUSTERS} Clusters, {N_POSTS} Posts + Relations in {time.time()-start:.2f}s")
 

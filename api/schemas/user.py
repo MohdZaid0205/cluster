@@ -46,3 +46,5 @@ class UserProfileResponse(BaseModel):
     profile_image: Optional[str] = None                                        # Image URL for the profile picture
     created_at   : datetime                                                    # Account creation timestamp
     last_active  : datetime                                                    # Most recent known interaction time
+    follower_count : Optional[int] = None                                    # Set on single-user profile fetches
+    following_count: Optional[int] = None                                    # Set on single-user profile fetches

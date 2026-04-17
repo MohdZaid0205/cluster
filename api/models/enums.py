@@ -31,6 +31,10 @@ class ReactionType(str, Enum):
     LIKE     = "LIKE"
     DISLIKE  = "DISLIKE"
     LOVE     = "LOVE"
+    LAUGH    = "LAUGH"
+    SAD      = "SAD"
+    WOW      = "WOW"
+    ANGRY    = "ANGRY"
 
 class MegaphoneType(str, Enum):
     """
@@ -39,6 +43,12 @@ class MegaphoneType(str, Enum):
     ANNOUNCEMENT = "ANNOUNCEMENT"
     POLL         = "POLL"
     EVENT        = "EVENT"
+
+class EventRsvpStatus(str, Enum):
+    """RSVP choices for megaphone EVENT type."""
+    GOING     = "GOING"
+    MAYBE     = "MAYBE"
+    NOT_GOING = "NOT_GOING"
 
 class RuleAction(str, Enum):
     """

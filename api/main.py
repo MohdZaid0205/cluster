@@ -9,9 +9,20 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from api.models.cluster import ClusterBookmark
     from api.database import engine
+    from api.models.cluster import ClusterBookmark
+    from api.models.follow import UserFollow
+    from api.models.post import (
+        MegaphonePollOption,
+        MegaphonePollVote,
+        MegaphoneEventMeta,
+        MegaphoneEventRsvp,
+    )
+
     ClusterBookmark.__table__.create(engine, checkfirst=True)
+    UserFollow.__table__.create(engine, checkfirst=True)
+    for tbl in (MegaphonePollOption, MegaphonePollVote, MegaphoneEventMeta, MegaphoneEventRsvp):
+        tbl.__table__.create(engine, checkfirst=True)
     yield
 
 app = FastAPI(title="Cluster API", version="1.0.0", description="Backend API for the Cluster application.", lifespan=lifespan)

@@ -9,6 +9,13 @@ from api.database import get_session
 from api.models.user import UserAuth, UserProfile, UserRole
 from api.security import get_password_hash
 from api.triggers import apply_triggers_now
+from api.models.follow import UserFollow  # noqa: F401
+from api.models.post import (  # noqa: F401
+    MegaphonePollOption,
+    MegaphonePollVote,
+    MegaphoneEventMeta,
+    MegaphoneEventRsvp,
+)
 
 # Setup perfectly isolated in-memory SQLite database
 DATABASE_URL = "sqlite://"

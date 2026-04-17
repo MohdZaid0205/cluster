@@ -6,6 +6,7 @@ from uuid import UUID
 
 from api.database import get_session
 from api.models.user import UserAuth, UserProfile
+from api.models.follow import UserFollow
 from api.models.post import PostCore, PostContent, PostStats
 from api.models.comment import CommentCore, CommentContent, CommentStats
 from api.schemas.user import UserCreate, UserResponse, UserProfileResponse, UserUpdate
@@ -14,9 +15,22 @@ from api.auth import create_access_token, get_current_user
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-# In-memory follow store (quick functional implementation without adding a new DB table)
-_follows: dict[str, set[str]] = {}    # target_uid -> set of follower_uids (who follows this user)
-_following: dict[str, set[str]] = {}  # follower_uid -> set of followed_uids (who this user follows)
+
+def _follow_counts(session: Session, uid: UUID) -> tuple[int, int]:
+    """How many users follow `uid`, and how many users `uid` follows."""
+    follower_count = len(
+        session.exec(select(UserFollow).where(UserFollow.following_uid == uid)).all()
+    )
+    following_count = len(
+        session.exec(select(UserFollow).where(UserFollow.follower_uid == uid)).all()
+    )
+    return follower_count, following_count
+
+
+def _profile_response_with_follow_counts(session: Session, profile: UserProfile) -> UserProfileResponse:
+    fc, fg = _follow_counts(session, profile.uid)
+    base = UserProfileResponse.model_validate(profile, from_attributes=True)
+    return base.model_copy(update={"follower_count": fc, "following_count": fg})
 
 @router.post("/", response_model=UserResponse)
 def create_user(user_in: UserCreate, session: Session = Depends(get_session)):
@@ -56,7 +70,7 @@ def get_my_profile(session: Session = Depends(get_session), current_user: UserAu
     profile = session.exec(statement).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return profile
+    return _profile_response_with_follow_counts(session, profile)
 
 @router.patch("/me/profile", response_model=UserProfileResponse)
 def update_my_profile(update_data: UserUpdate, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
@@ -66,7 +80,7 @@ def update_my_profile(update_data: UserUpdate, session: Session = Depends(get_se
     updated_profile = UserService.update_user_profile(session, current_user.uid, update_data.model_dump(exclude_unset=True))
     if not updated_profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return updated_profile
+    return _profile_response_with_follow_counts(session, updated_profile)
 
 @router.delete("/me/account")
 def delete_my_account(session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
@@ -118,7 +132,7 @@ def get_user(uid: UUID, session: Session = Depends(get_session)):
     profile = session.exec(statement).first()
     if not profile:
         raise HTTPException(status_code=404, detail="User not found")
-    return profile
+    return _profile_response_with_follow_counts(session, profile)
 
 @router.get("/", response_model=List[UserProfileResponse])
 def list_users(skip: int = 0, limit: int = 100, session: Session = Depends(get_session)):
@@ -146,12 +160,15 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), session: Session = D
 # ---- Follow / Unfollow --------------------------------------------------------
 
 @router.get("/{uid}/follow/me", response_model=Any)
-def check_follow_status(uid: UUID, current_user: UserAuth = Depends(get_current_user)):
+def check_follow_status(uid: UUID, session: Session = Depends(get_session), current_user: UserAuth = Depends(get_current_user)):
     """
     Returns whether the current user follows the target user.
     """
-    followers = _follows.get(str(uid), set())
-    return {"is_following": str(current_user.uid) in followers, "follower_count": len(followers)}
+    row = session.exec(
+        select(UserFollow).where(UserFollow.follower_uid == current_user.uid, UserFollow.following_uid == uid)
+    ).first()
+    fc, _fg = _follow_counts(session, uid)
+    return {"is_following": row is not None, "follower_count": fc}
 
 @router.post("/{uid}/follow")
 def follow_user(uid: UUID, current_user: UserAuth = Depends(get_current_user), session: Session = Depends(get_session)):
@@ -163,33 +180,40 @@ def follow_user(uid: UUID, current_user: UserAuth = Depends(get_current_user), s
     profile = session.exec(select(UserProfile).where(UserProfile.uid == uid)).first()
     if not profile:
         raise HTTPException(status_code=404, detail="User not found")
-    _follows.setdefault(str(uid), set()).add(str(current_user.uid))
-    _following.setdefault(str(current_user.uid), set()).add(str(uid))
-    return {"message": "Followed", "follower_count": len(_follows[str(uid)])}
+    existing = session.exec(
+        select(UserFollow).where(UserFollow.follower_uid == current_user.uid, UserFollow.following_uid == uid)
+    ).first()
+    if not existing:
+        session.add(UserFollow(follower_uid=current_user.uid, following_uid=uid))
+        session.commit()
+    fc, _fg = _follow_counts(session, uid)
+    return {"message": "Followed", "follower_count": fc}
 
 @router.delete("/{uid}/follow")
-def unfollow_user(uid: UUID, current_user: UserAuth = Depends(get_current_user)):
+def unfollow_user(uid: UUID, current_user: UserAuth = Depends(get_current_user), session: Session = Depends(get_session)):
     """
     Unfollows a user. Idempotent.
     """
-    _follows.setdefault(str(uid), set()).discard(str(current_user.uid))
-    _following.setdefault(str(current_user.uid), set()).discard(str(uid))
-    return {"message": "Unfollowed", "follower_count": len(_follows.get(str(uid), set()))}
+    row = session.exec(
+        select(UserFollow).where(UserFollow.follower_uid == current_user.uid, UserFollow.following_uid == uid)
+    ).first()
+    if row:
+        session.delete(row)
+        session.commit()
+    fc, _fg = _follow_counts(session, uid)
+    return {"message": "Unfollowed", "follower_count": fc}
 
 @router.get("/{uid}/followers", response_model=Any)
 def get_followers(uid: UUID, session: Session = Depends(get_session)):
     """
     Returns the list of users who follow the given uid.
     """
-    follower_uids = list(_follows.get(str(uid), set()))
+    rows = session.exec(select(UserFollow).where(UserFollow.following_uid == uid)).all()
     profiles = []
-    for fuid in follower_uids:
-        try:
-            p = session.exec(select(UserProfile).where(UserProfile.uid == fuid)).first()
-            if p:
-                profiles.append({"uid": str(p.uid), "name": p.name, "bio": p.bio})
-        except Exception:
-            pass
+    for row in rows:
+        p = session.get(UserProfile, row.follower_uid)
+        if p:
+            profiles.append({"uid": str(p.uid), "name": p.name, "bio": p.bio})
     return profiles
 
 @router.get("/{uid}/following", response_model=Any)
@@ -197,15 +221,12 @@ def get_following(uid: UUID, session: Session = Depends(get_session)):
     """
     Returns the list of users the given uid follows.
     """
-    following_uids = list(_following.get(str(uid), set()))
+    rows = session.exec(select(UserFollow).where(UserFollow.follower_uid == uid)).all()
     profiles = []
-    for fuid in following_uids:
-        try:
-            p = session.exec(select(UserProfile).where(UserProfile.uid == fuid)).first()
-            if p:
-                profiles.append({"uid": str(p.uid), "name": p.name, "bio": p.bio})
-        except Exception:
-            pass
+    for row in rows:
+        p = session.get(UserProfile, row.following_uid)
+        if p:
+            profiles.append({"uid": str(p.uid), "name": p.name, "bio": p.bio})
     return profiles
 
 # ---- Public user data ---------------------------------------------------------
@@ -213,15 +234,20 @@ def get_following(uid: UUID, session: Session = Depends(get_session)):
 @router.get("/{uid}/posts", response_model=List[Any])
 def get_user_posts(uid: UUID, session: Session = Depends(get_session)):
     """
-    Lists all content authored by a specific user system-wide.
+    Lists all posts by a user with the same shape as GET /posts (including megaphone metadata).
     """
-    return UserService.get_user_posts_across_clusters(session, uid)
+    from api.routers.posts import _serialize_post
+
+    rows = UserService.get_user_posts_across_clusters(session, uid)
+    return [_serialize_post(core, content, stats, session) for core, content, stats in rows]
 
 @router.get("/{uid}/recent-posts", response_model=List[Any])
 def get_user_recent_posts(uid: UUID, limit: int = 30, session: Session = Depends(get_session)):
     """
-    Returns recent posts by a user in full PostResponse shape.
+    Returns recent posts by a user in full PostResponse shape (including megaphone metadata).
     """
+    from api.routers.posts import _serialize_post
+
     statement = (
         select(PostCore, PostContent, PostStats)
         .join(PostContent, PostCore.pid == PostContent.pid)
@@ -231,15 +257,7 @@ def get_user_recent_posts(uid: UUID, limit: int = 30, session: Session = Depends
         .limit(limit)
     )
     results = session.exec(statement).all()
-    return [
-        {
-            "pid": core.pid, "uid": core.uid, "cid": core.cid,
-            "type": core.type, "content": content.content,
-            "tags": content.tags, "created_at": core.created_at,
-            "likes": stats.likes, "dislikes": stats.dislikes,
-        }
-        for core, content, stats in results
-    ]
+    return [_serialize_post(core, content, stats, session) for core, content, stats in results]
 
 @router.get("/{uid}/recent-comments", response_model=List[Any])
 def get_user_recent_comments(uid: UUID, limit: int = 30, session: Session = Depends(get_session)):
@@ -269,25 +287,35 @@ def get_user_post_distribution(uid: UUID, session: Session = Depends(get_session
     """
     Analyzes a user's posting behavior across multiple clusters.
     """
-    return UserService.get_user_post_distribution(session, uid)
+    rows = UserService.get_user_post_distribution(session, uid)
+    return [
+        {"cluster_name": r[1], "post_count": int(r[2])}
+        for r in rows
+    ]
 
 @router.get("/{uid}/top-comments", response_model=List[Any])
 def get_top_comments(uid: UUID, limit: int = 5, session: Session = Depends(get_session)):
     """
     Retrieves the most liked comments ever made by a user.
     """
-    return UserService.get_top_comments_by_user(session, uid, limit)
+    rows = UserService.get_top_comments_by_user(session, uid, limit)
+    return [
+        {"mid": str(r[0]), "content": r[1], "likes": r[2], "pid": str(r[3])}
+        for r in rows
+    ]
 
 @router.get("/{uid}/top-posts", response_model=List[Any])
 def get_top_posts(uid: UUID, limit: int = 5, session: Session = Depends(get_session)):
     """
     Retrieves the most positively received posts authored by a user.
     """
-    return UserService.get_top_posts_by_user(session, uid, limit)
+    rows = UserService.get_top_posts_by_user(session, uid, limit)
+    return [{"pid": str(r[0]), "content": r[1], "likes": r[2]} for r in rows]
 
 @router.get("/{uid}/most-disliked-posts", response_model=List[Any])
 def get_most_disliked_posts(uid: UUID, limit: int = 5, session: Session = Depends(get_session)):
     """
     Retrieves the most negatively received posts authored by a user.
     """
-    return UserService.get_most_disliked_posts_by_user(session, uid, limit)
+    rows = UserService.get_most_disliked_posts_by_user(session, uid, limit)
+    return [{"pid": str(r[0]), "content": r[1], "dislikes": r[2]} for r in rows]

@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import uuid4, UUID
 from datetime import datetime
 from sqlmodel import Field, SQLModel
-from api.models.enums import PostType, ReactionType, MegaphoneType
+from api.models.enums import PostType, ReactionType, MegaphoneType, EventRsvpStatus
 
 class PostCore(SQLModel, table=True):
     """
@@ -72,3 +72,42 @@ class Megaphone(SQLModel, table=True):
     type            : MegaphoneType                                                       # Category or style of the megaphone
     is_active       : bool       = True                                                   # Indicates if promotion is currently active
     subscriber_count: int        = 0                                                      # Number of users subscribed for updates
+
+
+class MegaphonePollOption(SQLModel, table=True):
+    """A single answer line for a POLL megaphone."""
+    __table_args__ = {"extend_existing": True}
+
+    pid   : UUID = Field(foreign_key="postcore.pid", primary_key=True)
+    idx   : int  = Field(primary_key=True)
+    label : str
+
+
+class MegaphonePollVote(SQLModel, table=True):
+    """One vote per cluster member per poll megaphone."""
+    __table_args__ = {"extend_existing": True}
+
+    pid        : UUID = Field(foreign_key="postcore.pid", primary_key=True)
+    uid        : UUID = Field(foreign_key="userauth.uid", primary_key=True)
+    option_idx : int
+    created_at : datetime = Field(default_factory=lambda: datetime.now())
+
+
+class MegaphoneEventMeta(SQLModel, table=True):
+    """Optional schedule/location for EVENT megaphones."""
+    __table_args__ = {"extend_existing": True}
+
+    pid       : UUID = Field(primary_key=True, foreign_key="postcore.pid")
+    starts_at : datetime | None = None
+    ends_at   : datetime | None = None
+    location  : str | None = None
+
+
+class MegaphoneEventRsvp(SQLModel, table=True):
+    """RSVP per user for EVENT megaphones (not a poll)."""
+    __table_args__ = {"extend_existing": True}
+
+    pid        : UUID = Field(foreign_key="postcore.pid", primary_key=True)
+    uid        : UUID = Field(foreign_key="userauth.uid", primary_key=True)
+    status     : EventRsvpStatus
+    updated_at : datetime = Field(default_factory=lambda: datetime.now())

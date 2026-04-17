@@ -7,10 +7,22 @@
 # or SQLAlchemy spins up, while providing convenient short import paths.
 # =====================================================================
 
-from .enums import UserRole, ClusterRole, PostType, ReactionType, MegaphoneType, RuleAction
+from .enums import UserRole, ClusterRole, PostType, ReactionType, MegaphoneType, EventRsvpStatus, RuleAction
 from .user import UserAuth, UserProfile
 from .cluster import ClusterCore, ClusterInfo, ClusterStats, ClusterMember, ClusterModerator, ClusterRule, ClusterBookmark
-from .post import PostCore, PostContent, PostStats, PostReaction, Window, Megaphone
+from .follow import UserFollow
+from .post import (
+    PostCore,
+    PostContent,
+    PostStats,
+    PostReaction,
+    Window,
+    Megaphone,
+    MegaphonePollOption,
+    MegaphonePollVote,
+    MegaphoneEventMeta,
+    MegaphoneEventRsvp,
+)
 from .comment import CommentCore, CommentContent, CommentStats, CommentReaction
 
 __all__ = [
@@ -36,9 +48,15 @@ __all__ = [
     "PostReaction",
     "Window",
     "Megaphone",
+    "MegaphonePollOption",
+    "MegaphonePollVote",
+    "MegaphoneEventMeta",
+    "MegaphoneEventRsvp",
     "PostType",
     "ReactionType",
     "MegaphoneType",
+    "EventRsvpStatus",
+    "UserFollow",
 
     # Comment
     "CommentCore",

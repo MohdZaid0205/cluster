@@ -236,9 +236,10 @@ class PostService:
 
             # 4. Create the Window record linking them
             window = Window(
-                pid=core_post.pid,
+                wid=core_post.pid,
                 origin_pid=origin_pid,
                 shared_by_uid=uid,
+                shared_into_cid=target_cid,
                 created_at=datetime.now()
             )
             session.add(window)
@@ -280,7 +281,7 @@ class PostService:
                         "dislikes": stats.dislikes if stats else 0,
                         "current_reaction": existing_Reaction.reaction_type.name,
                     }
-                # Decrease old stat counter
+                # Decrease old stat counter (LIKE/DISLIKE only; LOVE is tracked only on PostReaction rows)
                 if existing_Reaction.reaction_type.name == "LIKE" and stats:
                     session.exec(update(PostStats).where(PostStats.pid == pid).values(likes=PostStats.likes - 1))
                 elif existing_Reaction.reaction_type.name == "DISLIKE" and stats:

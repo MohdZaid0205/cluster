@@ -5,15 +5,30 @@ from uuid import UUID
 from datetime import datetime
 
 from api.database import get_session
-from api.models.post import PostCore, PostContent, PostStats, PostReaction, Megaphone, Window
+from api.models.post import (
+    PostCore,
+    PostContent,
+    PostStats,
+    PostReaction,
+    Megaphone,
+    Window,
+    MegaphonePollOption,
+    MegaphoneEventMeta,
+)
 from api.models.cluster import ClusterCore
 from api.models.user import UserProfile
 from api.schemas.post import PostCreate, PostResponse, PostReactionCreate
 from api.services.post_service import PostService
 from api.services.cluster_service import ClusterService
+from api.services.megaphone_engagement_service import (
+    get_poll_summary,
+    get_event_summary,
+    cast_poll_vote,
+    set_event_rsvp,
+)
 from api.models.user import UserAuth
-from api.models.enums import MegaphoneType, PostType
-from api.auth import get_current_user
+from api.models.enums import MegaphoneType, PostType, EventRsvpStatus
+from api.auth import get_current_user, get_current_user_optional
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
@@ -39,13 +54,22 @@ def _serialize_post(core: PostCore, content: PostContent | None, stats: PostStat
         # Attach megaphone metadata if a Megaphone record exists for this post
         meg = session.get(Megaphone, core.pid)
         if meg:
-            data["megaphone"] = {
+            mt = meg.type.value if hasattr(meg.type, "value") else str(meg.type)
+            cl = session.get(ClusterCore, core.cid)
+            mdict: dict = {
                 "start_time": meg.start_time.isoformat(),
                 "end_time": meg.end_time.isoformat(),
-                "type": meg.type.value if hasattr(meg.type, "value") else str(meg.type),
+                "type": mt,
                 "is_active": meg.is_active,
                 "subscriber_count": meg.subscriber_count,
+                "cluster_cid": str(core.cid),
+                "cluster_name": cl.name if cl else None,
             }
+            if mt == "POLL":
+                mdict["poll"] = get_poll_summary(session, core.pid, None)
+            if mt == "EVENT":
+                mdict["event"] = get_event_summary(session, core.pid, None)
+            data["megaphone"] = mdict
 
         # Attach window metadata if this is a WINDOW type post
         is_window = (core.type == PostType.WINDOW) or (hasattr(core.type, "value") and core.type.value == "WINDOW") or (core.type == "WINDOW")
@@ -243,6 +267,10 @@ class MegaphoneCreatePayload(BaseModel):
     tags: Optional[str] = None
     megaphone_type: MegaphoneType = MegaphoneType.ANNOUNCEMENT
     duration_hours: int = 24
+    poll_options: Optional[List[str]] = None
+    event_starts_at: Optional[datetime] = None
+    event_ends_at: Optional[datetime] = None
+    event_location: Optional[str] = None
 
 
 class PostSharePayload(BaseModel):
@@ -286,6 +314,17 @@ def create_megaphone(
     if not is_mod:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only cluster moderators can create megaphones.")
 
+    poll_opts: List[str] = []
+    if payload.megaphone_type == MegaphoneType.POLL:
+        poll_opts = [o.strip() for o in (payload.poll_options or []) if o and str(o).strip()]
+        if len(poll_opts) < 2 or len(poll_opts) > 10:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Poll megaphones require between 2 and 10 non-empty options.",
+            )
+    elif payload.poll_options:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="poll_options is only valid for POLL megaphones.")
+
     from api.schemas.post import PostCreate
     post_schema = PostCreate(
         uid=current_user.uid,
@@ -308,6 +347,19 @@ def create_megaphone(
         subscriber_count=0,
     )
     session.add(meg)
+    if poll_opts:
+        for i, label in enumerate(poll_opts):
+            session.add(MegaphonePollOption(pid=core_post.pid, idx=i, label=label))
+    if payload.megaphone_type == MegaphoneType.EVENT:
+        if payload.event_starts_at or payload.event_ends_at or (payload.event_location and payload.event_location.strip()):
+            session.add(
+                MegaphoneEventMeta(
+                    pid=core_post.pid,
+                    starts_at=payload.event_starts_at,
+                    ends_at=payload.event_ends_at,
+                    location=payload.event_location.strip() if payload.event_location else None,
+                )
+            )
     session.commit()
 
     return _serialize_post(core_post, content, stats, session)
@@ -350,7 +402,16 @@ def list_post_likers(pid: UUID, session: Session = Depends(get_session)):
 
 @router.get("/{pid}/reactions/stats", response_model=List[Any])
 def get_post_reaction_stats(pid: UUID, session: Session = Depends(get_session)):
-    return PostService.count_post_reactions_by_type(session, pid)
+    rows = PostService.count_post_reactions_by_type(session, pid)
+    out = []
+    for row in rows:
+        rt = row[0]
+        cnt = row[1]
+        name = getattr(rt, "name", None) or getattr(rt, "value", None) or str(rt)
+        if isinstance(name, str) and "." in name:
+            name = name.split(".")[-1]
+        out.append({"reaction_type": name, "count": int(cnt)})
+    return out
 
 
 @router.get("/{pid}/windows", response_model=List[Any])
@@ -404,18 +465,97 @@ def get_window_origin(pid: UUID, session: Session = Depends(get_session)):
 @router.get("/{pid}/megaphone-info", response_model=Any)
 def get_megaphone_info(pid: UUID, session: Session = Depends(get_session)):
     """
-    Returns megaphone metadata (start/end time, type, is_active) for a MEGAPHONE post.
-    Used by PostDetail to render a live countdown timer.
+    Returns megaphone metadata for a promoted post (cluster, schedule, poll/event summaries).
     """
-    from api.models.post import Megaphone
     meg = session.get(Megaphone, pid)
     if not meg:
         raise HTTPException(status_code=404, detail="No megaphone record for this post")
-    return {
+    core = session.get(PostCore, pid)
+    cl = session.get(ClusterCore, core.cid) if core else None
+    mt = meg.type.value if hasattr(meg.type, "value") else str(meg.type)
+    out: dict = {
         "pid": str(pid),
         "start_time": meg.start_time.isoformat(),
         "end_time": meg.end_time.isoformat(),
-        "type": meg.type.value if hasattr(meg.type, "value") else str(meg.type),
+        "type": mt,
         "is_active": meg.is_active,
         "subscriber_count": meg.subscriber_count,
+        "cluster_cid": str(core.cid) if core else None,
+        "cluster_name": cl.name if cl else None,
     }
+    if mt == "POLL":
+        out["poll"] = get_poll_summary(session, pid, None)
+    if mt == "EVENT":
+        out["event"] = get_event_summary(session, pid, None)
+    return out
+
+
+class PollVotePayload(BaseModel):
+    option_index: int
+
+
+class EventRsvpPayload(BaseModel):
+    status: str
+
+
+@router.get("/{pid}/megaphone/engagement", response_model=Any)
+def get_megaphone_engagement(
+    pid: UUID,
+    session: Session = Depends(get_session),
+    current_user: Optional[UserAuth] = Depends(get_current_user_optional),
+):
+    """
+    Live megaphone engagement: poll counts and per-user vote, or event RSVP totals and mine.
+    Poll periodically from the client for real-time updates.
+    """
+    meg = session.get(Megaphone, pid)
+    if not meg:
+        raise HTTPException(status_code=404, detail="No megaphone record for this post")
+    uid = current_user.uid if current_user else None
+    core = session.get(PostCore, pid)
+    cl = session.get(ClusterCore, core.cid) if core else None
+    mt = meg.type.value if hasattr(meg.type, "value") else str(meg.type)
+    out: dict = {
+        "pid": str(pid),
+        "start_time": meg.start_time.isoformat(),
+        "end_time": meg.end_time.isoformat(),
+        "type": mt,
+        "is_active": meg.is_active,
+        "subscriber_count": meg.subscriber_count,
+        "cluster_cid": str(core.cid) if core else None,
+        "cluster_name": cl.name if cl else None,
+    }
+    if mt == "POLL":
+        out["poll"] = get_poll_summary(session, pid, uid)
+    if mt == "EVENT":
+        out["event"] = get_event_summary(session, pid, uid)
+    return out
+
+
+@router.post("/{pid}/megaphone/poll/vote", response_model=Any)
+def vote_megaphone_poll(
+    pid: UUID,
+    body: PollVotePayload,
+    session: Session = Depends(get_session),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    try:
+        return cast_poll_vote(session, pid, current_user.uid, body.option_index)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{pid}/megaphone/event/rsvp", response_model=Any)
+def rsvp_megaphone_event(
+    pid: UUID,
+    body: EventRsvpPayload,
+    session: Session = Depends(get_session),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    try:
+        st = body.status.strip().upper()
+        if st not in ("GOING", "MAYBE", "NOT_GOING"):
+            raise ValueError("status must be GOING, MAYBE, or NOT_GOING")
+        return set_event_rsvp(session, pid, current_user.uid, EventRsvpStatus(st))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
