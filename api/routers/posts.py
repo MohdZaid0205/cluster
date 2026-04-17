@@ -7,6 +7,7 @@ from api.database import get_session
 from api.models.post import PostCore, PostContent, PostStats, PostReaction
 from api.schemas.post import PostCreate, PostResponse, PostReactionCreate
 from api.services.post_service import PostService
+from api.security import get_current_uid
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
 
@@ -87,4 +88,44 @@ def react_to_post(pid: UUID, reaction_in: PostReactionCreate, session: Session =
     Registers a user's reaction to a specific post.
     """
     PostService.add_reaction_to_post(session, pid, reaction_in.uid, reaction_in.reaction_type)
-    return {"message": "Reaction recorded successfully"}
+    stats = session.get(PostStats, pid)
+    return {
+        "message": "Reaction recorded successfully",
+        "likes": stats.likes if stats else 0,
+        "dislikes": stats.dislikes if stats else 0,
+        "current_reaction": reaction_in.reaction_type,
+    }
+
+
+@router.get("/{pid}/reaction/me")
+def get_my_reaction(
+    pid: UUID,
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Returns the authenticated user's reaction for a post, if any.
+    """
+    reaction = session.exec(
+        select(PostReaction).where(PostReaction.pid == pid, PostReaction.uid == uid)
+    ).first()
+    return {"reaction": reaction.reaction_type if reaction else None}
+
+
+@router.delete("/{pid}/react")
+def remove_my_reaction(
+    pid: UUID,
+    uid: UUID = Depends(get_current_uid),
+    session: Session = Depends(get_session),
+):
+    """
+    Removes the authenticated user's reaction from a post.
+    """
+    removed = PostService.remove_reaction_from_post(session, pid, uid)
+    stats = session.get(PostStats, pid)
+    return {
+        "removed": removed,
+        "likes": stats.likes if stats else 0,
+        "dislikes": stats.dislikes if stats else 0,
+        "current_reaction": None,
+    }
